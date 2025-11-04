@@ -1,0 +1,46 @@
+# Node dependencies
+node_modules/
+
+# Build outputs
+dist/
+build/
+server/public/
+
+# Environment variables
+.env
+.env.*       # ví dụ .env.local, .env.production
+
+# System files
+.DS_Store
+Thumbs.db
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Archives / temporary files
+*.tar.gz
+*.zip
+
+# TypeScript
+*.tsbuildinfo
+
+# Vite config backups or temp files
+vite.config.ts.*
+vite.config.js.*
+
+# Images (nếu bạn không muốn lưu hình trong repo)
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.svg
+
+# IDE/editor folders
+.vscode/
+.idea/
+
+# OS-specific files
+Desktop.ini
