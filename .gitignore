@@ -44,3 +44,6 @@ vite.config.js.*
 
 # OS-specific files
 Desktop.ini
+
+venv/
+__pycache__

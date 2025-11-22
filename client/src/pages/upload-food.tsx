@@ -26,7 +26,7 @@ export default function UploadFood() {
       const formData = new FormData();
       formData.append("image", file);
       formData.append("weight", weight.toString());
-      const response = await apiRequest<FoodAnalysisResult>("POST", "/api/food/analyze", formData);
+      const response = await apiRequest<FoodAnalysisResult>("POST", "/api/food/analyzeByModel", formData);
       return response;
     },
     onSuccess: (data) => {
