@@ -7,6 +7,15 @@ import path from "path";
 
 let openai: OpenAI | null = null;
 
+interface UserProfileContext {
+  name: string;
+  age: number;
+  gender: string;
+  height: number;
+  weight: number;
+  goal: string;
+}
+
 function getOpenAIClient(): OpenAI {
   if (!openai) {
     if (!process.env.OPENAI_API_KEY) {
@@ -85,5 +94,56 @@ export async function generateFoodAdvice(foodName: string): Promise<string> {
     return response.choices[0].message.content || "Good for your health.";
   } catch (error) {
     return "Good for your health.";
+  }
+}
+
+export async function generatePersonalizedFoodAdvice(
+  userProfile: UserProfileContext,
+  foodName: string,
+  calories: number
+): Promise<string> {
+  try {
+    const client = getOpenAIClient();
+    
+    // Xây dựng prompt chi tiết
+    const prompt = `
+    You are a professional nutritionist. Provide a personalized review of a food item for a specific user.
+    
+    User Profile:
+    - Name: ${userProfile.name}
+    - Age: ${userProfile.age}
+    - Gender: ${userProfile.gender}
+    - Height: ${userProfile.height}cm
+    - Weight: ${userProfile.weight}kg
+    - Fitness Goal: ${userProfile.goal} (lose_weight/maintain/gain_muscle)
+
+    Food Item:
+    - Name: ${foodName}
+    - Estimated Calories: ${calories} kcal
+
+    Please analyze this food item in the context of the user's goals and stats. 
+    Is it a good choice for them? What should they be careful about? 
+    Keep the advice encouraging but realistic. Limit to 3-4 sentences.
+    `;
+
+    const response = await client.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        {
+          role: "system",
+          content: "You are a helpful nutrition assistant.",
+        },
+        {
+          role: "user",
+          content: prompt,
+        },
+      ],
+      max_completion_tokens: 300,
+    });
+
+    return response.choices[0].message.content || "Could not generate advice at this time.";
+  } catch (error) {
+    console.error("OpenAI Error:", error);
+    throw new Error("Failed to generate personalized advice");
   }
 }

@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/lib/auth-context";
 import { apiRequest } from "@/lib/queryClient";
+import { Loader2 } from "lucide-react";
 import { CloudArrowUpIcon, InformationCircleIcon, ScaleIcon } from "@heroicons/react/24/outline";
 import type { FoodAnalysisResult, FoodEntry } from "@shared/schema";
 
@@ -16,6 +17,7 @@ export default function UploadFood() {
   const [weight, setWeight] = useState<string>("100");
   const [result, setResult] = useState<FoodAnalysisResult | null>(null);
   const [showAdvice, setShowAdvice] = useState(false);
+  const [personalizedAdvice, setPersonalizedAdvice] = useState<string | null>(null);
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -41,6 +43,24 @@ export default function UploadFood() {
       toast({
         title: "Analysis failed",
         description: error.message || "Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const reviewMutation = useMutation({
+    mutationFn: async (data: { foodName: string; calories: number }) => {
+      const response = await apiRequest<{ advice: string }>("POST", "/api/food/review-personalized", data);
+      return response;
+    },
+    onSuccess: (data) => {
+      setPersonalizedAdvice(data.advice); // Lưu advice mới nhận được vào state
+      setShowAdvice(true); // Hiển thị khung advice
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Review failed",
+        description: "Could not get personalized advice. Please try again.",
         variant: "destructive",
       });
     },
@@ -82,6 +102,7 @@ export default function UploadFood() {
       setPreviewUrl(URL.createObjectURL(file));
       setResult(null);
       setShowAdvice(false);
+      setPersonalizedAdvice(null);
     }
   };
 
@@ -93,7 +114,13 @@ export default function UploadFood() {
   };
 
   const handleReviewFood = () => {
-    setShowAdvice(true);
+    if (result) {
+      // Gọi API với tên món và calo hiện tại
+      reviewMutation.mutate({ 
+        foodName: result.foodName, 
+        calories: result.totalCalories 
+      });
+    }
   };
 
   const handleAddToTracker = () => {
@@ -108,6 +135,7 @@ export default function UploadFood() {
     setResult(null);
     setWeight("100");
     setShowAdvice(false);
+    setPersonalizedAdvice(null);
   };
 
   return (
@@ -219,23 +247,33 @@ export default function UploadFood() {
                       <div className="flex gap-4 p-4 rounded-lg bg-muted/50 animate-in fade-in slide-in-from-top-2">
                         <InformationCircleIcon className="h-6 w-6 text-primary flex-shrink-0 mt-0.5" />
                         <div className="space-y-1">
-                          <p className="text-sm font-semibold">Nutritional Advice</p>
+                          <p className="text-sm font-semibold">Personalized Nutrition Advice</p>
                           <p className="text-sm text-muted-foreground leading-relaxed" data-testid="text-advice">
-                            {result.advice}
+                            {/* Ưu tiên hiển thị personalizedAdvice, nếu chưa có thì hiển thị cái cũ hoặc loading */}
+                            {personalizedAdvice || result.advice}
                           </p>
                         </div>
                       </div>
                     )}
 
                     <div className="flex gap-4">
+                      {/* Ẩn nút Review khi đã hiển thị advice để tránh bấm nhiều lần, hoặc giữ lại tùy bạn */}
                       {!showAdvice && (
                         <Button
                           onClick={handleReviewFood}
                           variant="outline"
                           className="flex-1 h-12 rounded-lg font-semibold"
+                          disabled={reviewMutation.isPending} // Disable khi đang load
                           data-testid="button-review"
                         >
-                          Review the Food
+                          {reviewMutation.isPending ? (
+                            <>
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" /> 
+                              Reviewing...
+                            </>
+                          ) : (
+                            "Review the Food"
+                          )}
                         </Button>
                       )}
                       <Button

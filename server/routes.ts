@@ -3,7 +3,7 @@ import { createServer, type Server } from "http";
 import { storage } from "./storage-db";
 import multer from "multer";
 import { insertUserSchema, insertFoodEntrySchema, insertFoodItemSchema, insertChatMessageSchema, type UserProfile, type CalorieStats, type MealSuggestion, type FoodAnalysisResult } from "@shared/schema";
-import { analyzeFoodImageByChatGPT, generateFoodAdvice } from "./openai-service";
+import { analyzeFoodImageByChatGPT, generateFoodAdvice, generatePersonalizedFoodAdvice } from "./openai-service";
 import { analyzeFoodImageByEfficientnetB1Model } from "./model-service";
 import { getChatbotResponse } from "./chatbot";
 import { z } from "zod";
@@ -422,6 +422,40 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // API mới cho việc Review cá nhân hóa
+  app.post("/api/food/review-personalized", requireAuth, async (req, res) => {
+    try {
+      const { foodName, calories } = req.body;
+      const userId = req.session.userId!;
+
+      // 1. Lấy thông tin User từ DB
+      const user = await storage.getUser(userId);
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      // 2. Chuẩn bị context
+      const userProfile = {
+        name: user.name,
+        age: user.age,
+        gender: user.gender,
+        height: user.height,
+        weight: user.weight,
+        goal: user.goal,
+      };
+
+      // 3. Gọi OpenAI với thông tin User + Món ăn
+      const advice = await generatePersonalizedFoodAdvice(userProfile, foodName, calories);
+
+      // 4. Trả về kết quả
+      res.json({ advice });
+
+    } catch (error) {
+      console.error("Review error:", error);
+      res.status(500).json({ message: "Failed to generate review" });
+    }
+  });
+
   // Clear chat history
   app.delete("/api/chat/history", requireAuth, async (req, res) => {
     try {
@@ -436,3 +470,4 @@ export async function registerRoutes(app: Express): Promise<Server> {
   const httpServer = createServer(app);
   return httpServer;
 }
+
