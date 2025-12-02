@@ -25,7 +25,6 @@ export default function Chatbot() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/chat/messages"] });
-      setMessage("");
     },
     onError: (error: any) => {
       toast({
@@ -60,6 +59,7 @@ export default function Chatbot() {
     e.preventDefault();
     if (message.trim() && !sendMutation.isPending) {
       sendMutation.mutate(message.trim());
+      setMessage(""); 
     }
   };
 
@@ -73,7 +73,7 @@ export default function Chatbot() {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [messages]);
+  }, [messages, sendMutation.isPending]);
 
   return (
     <div className="container mx-auto max-w-4xl p-4">
@@ -100,7 +100,7 @@ export default function Chatbot() {
               <div className="flex items-center justify-center h-full text-muted-foreground">
                 Loading chat history...
               </div>
-            ) : messages.length === 0 ? (
+            ) : messages.length === 0 && !sendMutation.isPending ? (
               <div className="flex flex-col items-center justify-center h-full text-center p-8">
                 <Bot className="h-16 w-16 text-muted-foreground mb-4" />
                 <h3 className="text-lg font-semibold mb-2">Welcome to your AI Health Assistant!</h3>
@@ -141,13 +141,30 @@ export default function Chatbot() {
                     )}
                   </div>
                 ))}
+
                 {sendMutation.isPending && (
-                  <div className="flex gap-3 justify-start">
+                  <div className="flex gap-3 justify-end animate-in fade-in slide-in-from-bottom-2">
+                    <div className="max-w-[80%] rounded-lg p-3 bg-primary text-primary-foreground">
+                      <p className="text-sm whitespace-pre-wrap">{sendMutation.variables}</p>
+                      <span className="text-xs opacity-70 mt-1 block">Sending...</span>
+                    </div>
+                    <div className="flex-shrink-0 w-8 h-8 rounded-full bg-primary flex items-center justify-center">
+                      <UserIcon className="h-5 w-5 text-primary-foreground" />
+                    </div>
+                  </div>
+                )}
+
+                {sendMutation.isPending && (
+                  <div className="flex gap-3 justify-start animate-in fade-in slide-in-from-bottom-2">
                     <div className="flex-shrink-0 w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
                       <Bot className="h-5 w-5 text-primary animate-pulse" />
                     </div>
                     <div className="max-w-[80%] rounded-lg p-3 bg-muted">
-                      <p className="text-sm text-muted-foreground">Thinking...</p>
+                      <div className="flex space-x-1 h-5 items-center">
+                        <div className="w-2 h-2 bg-muted-foreground/40 rounded-full animate-bounce [animation-delay:-0.3s]"></div>
+                        <div className="w-2 h-2 bg-muted-foreground/40 rounded-full animate-bounce [animation-delay:-0.15s]"></div>
+                        <div className="w-2 h-2 bg-muted-foreground/40 rounded-full animate-bounce"></div>
+                      </div>
                     </div>
                   </div>
                 )}
