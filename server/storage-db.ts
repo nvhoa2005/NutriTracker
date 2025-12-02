@@ -169,15 +169,26 @@ export class DbStorage implements IStorage {
   // === FOOD ENTRIES ===
   async getFoodEntry(id: string): Promise<FoodEntry | undefined> {
     const pool = this.getPool();
-    const [rows] = await pool.query("SELECT * FROM food_entries WHERE id = ?", [id]);
+    const [rows] = await pool.query(
+      `SELECT fe.*, fi.name as food_name 
+       FROM food_entries fe
+       LEFT JOIN food_items fi ON fe.food_id = fi.id
+       WHERE fe.id = ?`, 
+      [id]
+    );
     const data = Array.isArray(rows) ? rows[0] : undefined;
     return data ? mapFoodEntryFromDb(data) : undefined;
   }
 
   async getFoodEntriesByUser(userId: string): Promise<FoodEntry[]> {
     const pool = this.getPool();
+    // JOIN bảng food_entries với food_items để lấy tên món ăn (name as food_name)
     const [rows] = await pool.query(
-      "SELECT * FROM food_entries WHERE user_id = ? ORDER BY timestamp DESC", 
+      `SELECT fe.*, fi.name as food_name, fe.food_id 
+       FROM food_entries fe
+       LEFT JOIN food_items fi ON fe.food_id = fi.id
+       WHERE fe.user_id = ? 
+       ORDER BY fe.timestamp DESC`, 
       [userId]
     );
     return Array.isArray(rows) ? rows.map(mapFoodEntryFromDb) : [];
@@ -185,21 +196,66 @@ export class DbStorage implements IStorage {
 
   async createFoodEntry(entry: InsertFoodEntry): Promise<FoodEntry> {
     const pool = this.getPool();
-    const id = randomUUID();
+
+    // --- BƯỚC 1: Xử lý logic tạo ID mới (Format: f{userIdNum}_{sequence}) ---
+    
+    // 1. Lấy phần số từ user_id (ví dụ: "u1" -> "1")
+    // Dùng regex để chỉ lấy số, phòng trường hợp id phức tạp hơn
+    const userIdNum = entry.userId.replace(/\D/g, '') || entry.userId; 
+
+    // 2. Lấy danh sách tất cả ID hiện có của user này để tìm số thứ tự lớn nhất
+    const [existingRows] = await pool.query(
+      "SELECT id FROM food_entries WHERE user_id = ?",
+      [entry.userId]
+    );
+
+    let maxSequence = 0;
+
+    if (Array.isArray(existingRows)) {
+      existingRows.forEach((row: any) => {
+        // ID có dạng f1_10. Ta cần tách lấy phần sau dấu "_"
+        const parts = row.id.split('_');
+        if (parts.length === 2) {
+          const sequence = parseInt(parts[1], 10);
+          // Kiểm tra nếu là số hợp lệ và lớn hơn max hiện tại thì cập nhật
+          if (!isNaN(sequence) && sequence > maxSequence) {
+            maxSequence = sequence;
+          }
+        }
+      });
+    }
+
+    // 3. Tạo ID mới = f + userNum + _ + (maxSequence + 1)
+    const newId = `f${userIdNum}_${maxSequence + 1}`;
+
+    // --- BƯỚC 2: Xử lý logic tìm food_id (giữ nguyên logic bài trước) ---
+
+    let foodItem = await this.getFoodItemByName(entry.foodName);
+
+    if (!foodItem) {
+      foodItem = await this.createFoodItem({
+        name: entry.foodName,
+        caloriesPer100g: 0, 
+        advice: entry.dietComment || "Good for your health.",
+      });
+    }
+
+    // --- BƯỚC 3: Insert vào DB với ID mới ---
+
     await pool.query(
-      `INSERT INTO food_entries (id, user_id, food_name, calories, weight, image_url, diet_comment, timestamp)
-       VALUES (?, ?, ?, ?, ?, ?, ?, NOW())`,
+      `INSERT INTO food_entries (id, user_id, food_id, calories, image_url, diet_comment, timestamp)
+       VALUES (?, ?, ?, ?, ?, ?, NOW())`,
       [
-        id,
+        newId, // Sử dụng ID vừa tạo theo format f1_11
         entry.userId,
-        entry.foodName,
+        foodItem.id,
         entry.calories,
-        entry.weight ?? null,
         entry.imageUrl ?? null,
         entry.dietComment ?? null,
       ]
     );
-    const created = await this.getFoodEntry(id);
+
+    const created = await this.getFoodEntry(newId);
     if (!created) throw new Error("Create food entry failed");
     return created;
   }
