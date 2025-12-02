@@ -34,6 +34,7 @@ export default function UploadFood() {
     onSuccess: (data) => {
       setResult(data);
       setShowAdvice(false);
+      setPersonalizedAdvice(null); // Reset advice cũ khi có ảnh mới
       toast({
         title: "Food analyzed!",
         description: `${data.foodName} identified - ${data.totalCalories} kcal estimated.`,
@@ -54,27 +55,45 @@ export default function UploadFood() {
       return response;
     },
     onSuccess: (data) => {
-      setPersonalizedAdvice(data.advice); // Lưu advice mới nhận được vào state
-      setShowAdvice(true); // Hiển thị khung advice
+      setPersonalizedAdvice(data.advice);
+      setShowAdvice(true);
     },
-    onError: (error: Error) => {
+    onError: () => {
       toast({
         title: "Review failed",
-        description: "Could not get personalized advice. Please try again.",
+        description: "Could not get personalized advice.",
         variant: "destructive",
       });
     },
   });
 
   const addToTrackerMutation = useMutation({
-    mutationFn: async (data: FoodAnalysisResult) => {
+    mutationFn: async ({ data, currentAdvice }: { data: FoodAnalysisResult; currentAdvice: string | null }) => {
+      let finalAdvice = currentAdvice;
+
+      // TRƯỜNG HỢP 2: Nếu chưa có review (người dùng chưa bấm nút Review)
+      // Thì gọi API review ngay lập tức trước khi lưu
+      if (!finalAdvice) {
+        const reviewResponse = await apiRequest<{ advice: string }>("POST", "/api/food/review-personalized", {
+          foodName: data.foodName,
+          calories: data.totalCalories
+        });
+        finalAdvice = reviewResponse.advice;
+        // Cập nhật state để UI hiển thị luôn (tùy chọn)
+        setPersonalizedAdvice(finalAdvice); 
+        setShowAdvice(true);
+      }
+
+      // Chuẩn bị dữ liệu lưu vào DB
       const entry = {
         userId: user?.id,
         foodName: data.foodName,
         calories: data.totalCalories,
         weight: data.weight,
-        dietComment: data.advice,
+        dietComment: finalAdvice, // Luôn dùng personalized advice
       };
+
+      // Gọi API lưu
       const response = await apiRequest<FoodEntry>("POST", "/api/food/entry", entry);
       return response;
     },
@@ -82,7 +101,7 @@ export default function UploadFood() {
       queryClient.invalidateQueries({ queryKey: ["/api/calories/daily"] });
       toast({
         title: "Added to tracker!",
-        description: "Food entry has been logged successfully.",
+        description: "Food entry and nutritional advice logged successfully.",
       });
       handleReset();
     },
@@ -115,7 +134,6 @@ export default function UploadFood() {
 
   const handleReviewFood = () => {
     if (result) {
-      // Gọi API với tên món và calo hiện tại
       reviewMutation.mutate({ 
         foodName: result.foodName, 
         calories: result.totalCalories 
@@ -123,9 +141,14 @@ export default function UploadFood() {
     }
   };
 
+  // Hàm xử lý khi bấm Add to Tracker
   const handleAddToTracker = () => {
     if (result) {
-      addToTrackerMutation.mutate(result);
+      // Truyền vào kết quả phân tích VÀ advice hiện tại (có thể là null)
+      addToTrackerMutation.mutate({ 
+        data: result, 
+        currentAdvice: personalizedAdvice 
+      });
     }
   };
 
@@ -249,7 +272,6 @@ export default function UploadFood() {
                         <div className="space-y-1">
                           <p className="text-sm font-semibold">Personalized Nutrition Advice</p>
                           <p className="text-sm text-muted-foreground leading-relaxed" data-testid="text-advice">
-                            {/* Ưu tiên hiển thị personalizedAdvice, nếu chưa có thì hiển thị cái cũ hoặc loading */}
                             {personalizedAdvice || result.advice}
                           </p>
                         </div>
@@ -257,18 +279,18 @@ export default function UploadFood() {
                     )}
 
                     <div className="flex gap-4">
-                      {/* Ẩn nút Review khi đã hiển thị advice để tránh bấm nhiều lần, hoặc giữ lại tùy bạn */}
+                      {/* Nút Review */}
                       {!showAdvice && (
                         <Button
                           onClick={handleReviewFood}
                           variant="outline"
                           className="flex-1 h-12 rounded-lg font-semibold"
-                          disabled={reviewMutation.isPending} // Disable khi đang load
+                          disabled={reviewMutation.isPending || addToTrackerMutation.isPending}
                           data-testid="button-review"
                         >
                           {reviewMutation.isPending ? (
                             <>
-                              <Loader2 className="mr-2 h-4 w-4 animate-spin" /> 
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                               Reviewing...
                             </>
                           ) : (
@@ -276,13 +298,22 @@ export default function UploadFood() {
                           )}
                         </Button>
                       )}
+                      {/* Nút Add to Tracker */}
                       <Button
                         onClick={handleAddToTracker}
-                        disabled={addToTrackerMutation.isPending}
+                        disabled={addToTrackerMutation.isPending || reviewMutation.isPending}
                         className="flex-1 h-12 rounded-lg font-semibold"
                         data-testid="button-add-tracker"
                       >
-                        {addToTrackerMutation.isPending ? "Adding..." : "Add to Tracker"}
+                        {addToTrackerMutation.isPending ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            {/* Hiển thị text khác nhau tùy context */}
+                            {!personalizedAdvice ? "Reviewing & Adding..." : "Adding..."}
+                          </>
+                        ) : (
+                          "Add to Tracker"
+                        )}
                       </Button>
                     </div>
 
