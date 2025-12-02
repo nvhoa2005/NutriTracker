@@ -5,7 +5,6 @@ import type { ChatMessage } from "@shared/schema";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Send, Trash2, Bot, User as UserIcon } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
@@ -59,7 +58,7 @@ export default function Chatbot() {
     e.preventDefault();
     if (message.trim() && !sendMutation.isPending) {
       sendMutation.mutate(message.trim());
-      setMessage(""); 
+      setMessage("");
     }
   };
 
@@ -71,16 +70,20 @@ export default function Chatbot() {
 
   useEffect(() => {
     if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+      const div = scrollRef.current;
+      div.scrollTop = div.scrollHeight;
     }
   }, [messages, sendMutation.isPending]);
 
   return (
-    <div className="container mx-auto max-w-4xl p-4">
-      <Card className="h-[calc(100vh-8rem)]">
-        <CardHeader className="flex flex-row items-center justify-between">
+    <div className="container mx-auto max-w-4xl p-4 pt-6 h-[calc(100vh-2rem)]">
+      
+      {/* [SỬA]: 'bg-white' cho Light mode, 'dark:bg-card' cho Dark mode */}
+      <Card className="h-[80vh] flex flex-col shadow-sm bg-white dark:bg-card">
+        
+        <CardHeader className="flex flex-row items-center justify-between pb-2 border-b">
           <CardTitle className="flex items-center gap-2">
-            <Bot className="h-6 w-6" />
+            <Bot className="h-6 w-6 text-primary" />
             Health & Nutrition Assistant
           </CardTitle>
           <Button
@@ -94,8 +97,13 @@ export default function Chatbot() {
             Clear History
           </Button>
         </CardHeader>
-        <CardContent className="flex flex-col h-[calc(100%-5rem)]">
-          <ScrollArea className="flex-1 pr-4" ref={scrollRef}>
+
+        <CardContent className="flex-1 flex flex-col overflow-hidden pt-0">
+          
+          <div 
+            ref={scrollRef} 
+            className="flex-1 overflow-y-auto p-4 space-y-4 scroll-smooth"
+          >
             {isLoading ? (
               <div className="flex items-center justify-center h-full text-muted-foreground">
                 Loading chat history...
@@ -110,7 +118,7 @@ export default function Chatbot() {
                 </p>
               </div>
             ) : (
-              <div className="space-y-4 pb-4">
+              <div className="flex flex-col gap-4 pb-2">
                 {messages.map((msg) => (
                   <div
                     key={msg.id}
@@ -131,7 +139,7 @@ export default function Chatbot() {
                     >
                       <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
                       <span className="text-xs opacity-70 mt-1 block">
-                        {new Date(msg.timestamp).toLocaleTimeString()}
+                        {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                       </span>
                     </div>
                     {msg.role === "user" && (
@@ -144,9 +152,9 @@ export default function Chatbot() {
 
                 {sendMutation.isPending && (
                   <div className="flex gap-3 justify-end animate-in fade-in slide-in-from-bottom-2">
-                    <div className="max-w-[80%] rounded-lg p-3 bg-primary text-primary-foreground">
+                    <div className="max-w-[80%] rounded-lg p-3 bg-primary text-primary-foreground opacity-70">
                       <p className="text-sm whitespace-pre-wrap">{sendMutation.variables}</p>
-                      <span className="text-xs opacity-70 mt-1 block">Sending...</span>
+                      <span className="text-xs mt-1 block">Sending...</span>
                     </div>
                     <div className="flex-shrink-0 w-8 h-8 rounded-full bg-primary flex items-center justify-center">
                       <UserIcon className="h-5 w-5 text-primary-foreground" />
@@ -170,25 +178,29 @@ export default function Chatbot() {
                 )}
               </div>
             )}
-          </ScrollArea>
+          </div>
 
-          <form onSubmit={handleSendMessage} className="flex gap-2 mt-4">
-            <Input
-              value={message}
-              onChange={(e) => setMessage(e.target.value)}
-              placeholder="Ask me about nutrition, calories, or fitness advice..."
-              disabled={sendMutation.isPending}
-              className="flex-1"
-              data-testid="input-message"
-            />
-            <Button
-              type="submit"
-              disabled={!message.trim() || sendMutation.isPending}
-              data-testid="button-send"
-            >
-              <Send className="h-4 w-4" />
-            </Button>
-          </form>
+          {/* [SỬA]: Tương tự cho vùng nhập liệu */}
+          <div className="p-4 border-t bg-white dark:bg-card">
+            <form onSubmit={handleSendMessage} className="flex gap-2">
+              <Input
+                value={message}
+                onChange={(e) => setMessage(e.target.value)}
+                placeholder="Ask me about nutrition, calories, or fitness advice..."
+                disabled={sendMutation.isPending}
+                className="flex-1"
+                data-testid="input-message"
+              />
+              <Button
+                type="submit"
+                disabled={!message.trim() || sendMutation.isPending}
+                data-testid="button-send"
+              >
+                <Send className="h-4 w-4" />
+              </Button>
+            </form>
+          </div>
+
         </CardContent>
       </Card>
     </div>

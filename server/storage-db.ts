@@ -309,7 +309,7 @@ export class DbStorage implements IStorage {
   async getChatMessagesByUser(userId: string): Promise<ChatMessage[]> {
     const pool = this.getPool();
     const [rows] = await pool.query(
-      "SELECT * FROM chat_messages WHERE user_id = ? ORDER BY timestamp ASC LIMIT 10",
+      "SELECT * FROM chat_messages WHERE user_id = ? ORDER BY timestamp ASC",
       [userId]
     );
     return Array.isArray(rows) ? rows.map(mapChatMessageFromDb) : [];

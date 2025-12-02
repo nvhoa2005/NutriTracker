@@ -16,6 +16,20 @@ interface UserProfileContext {
   goal: string;
 }
 
+export interface RecipeData {
+  description: string;
+  ingredients: string[];
+  instructions: string[];
+  macros: {
+    calories: number;
+    protein: string;
+    carbs: string;
+    fat: string;
+  };
+  cookingTime: string;
+  difficulty: string;
+}
+
 function getOpenAIClient(): OpenAI {
   if (!openai) {
     if (!process.env.OPENAI_API_KEY) {
@@ -24,6 +38,53 @@ function getOpenAIClient(): OpenAI {
     openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
   }
   return openai;
+}
+
+export async function generateMealRecipe(mealName: string): Promise<RecipeData> {
+  try {
+    const client = getOpenAIClient();
+    
+    const prompt = `
+      Create a healthy recipe for: "${mealName}".
+      Return ONLY a valid JSON object with the following structure (no markdown, no extra text):
+      {
+        "description": "A brief, appetizing description (1-2 sentences)",
+        "ingredients": ["ingredient 1", "ingredient 2", ...],
+        "instructions": ["step 1", "step 2", ...],
+        "macros": {
+          "calories": number (estimated total),
+          "protein": "e.g. 25g",
+          "carbs": "e.g. 30g",
+          "fat": "e.g. 10g"
+        },
+        "cookingTime": "e.g. 20 mins",
+        "difficulty": "Easy/Medium/Hard"
+      }
+    `;
+
+    const response = await client.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: "You are a professional chef and nutritionist." },
+        { role: "user", content: prompt },
+      ],
+      response_format: { type: "json_object" },
+    });
+
+    const content = response.choices[0].message.content || "{}";
+    return JSON.parse(content) as RecipeData;
+  } catch (error) {
+    console.error("Recipe generation error:", error);
+    // Trả về dữ liệu giả nếu lỗi để không crash app
+    return {
+      description: "Could not load recipe details.",
+      ingredients: [],
+      instructions: [],
+      macros: { calories: 0, protein: "0g", carbs: "0g", fat: "0g" },
+      cookingTime: "N/A",
+      difficulty: "Unknown"
+    };
+  }
 }
 
 export async function analyzeFoodImageByChatGPT(base64Image: string): Promise<{ foodName: string; confidence: number }> {

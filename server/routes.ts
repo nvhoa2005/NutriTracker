@@ -3,7 +3,7 @@ import { createServer, type Server } from "http";
 import { storage } from "./storage-db";
 import multer from "multer";
 import { insertUserSchema, insertFoodEntrySchema, insertFoodItemSchema, insertChatMessageSchema, type UserProfile, type CalorieStats, type MealSuggestion, type FoodAnalysisResult } from "@shared/schema";
-import { analyzeFoodImageByChatGPT, generateFoodAdvice, generatePersonalizedFoodAdvice } from "./openai-service";
+import { analyzeFoodImageByChatGPT, generateFoodAdvice, generatePersonalizedFoodAdvice, generateMealRecipe } from "./openai-service";
 import { analyzeFoodImageByEfficientnetB1Model } from "./model-service";
 import { getChatbotResponse } from "./chatbot";
 import { z } from "zod";
@@ -431,6 +431,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       console.error("Chat error:", error);
       res.status(500).json({ message: error.message || "Failed to process chat message" });
+    }
+  });
+
+  // API lấy chi tiết công thức món ăn
+  app.post("/api/meals/recipe", requireAuth, async (req, res) => {
+    try {
+      const { mealName } = req.body;
+      if (!mealName) return res.status(400).json({ message: "Meal name is required" });
+
+      const recipe = await generateMealRecipe(mealName);
+      res.json(recipe);
+    } catch (error) {
+      console.error("Recipe API Error:", error);
+      res.status(500).json({ message: "Failed to fetch recipe" });
     }
   });
 
