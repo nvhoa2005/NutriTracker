@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -24,7 +24,13 @@ type LoginFormData = z.infer<typeof loginSchema>;
 export default function Login() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
-  const { login } = useAuth();
+  const { login, user } = useAuth();
+
+  useEffect(() => {
+    if (user) {
+      setLocation("/dashboard");
+    }
+  }, [user, setLocation]);
 
   const form = useForm<LoginFormData>({
     resolver: zodResolver(loginSchema),
@@ -45,7 +51,6 @@ export default function Login() {
         title: "Welcome back!",
         description: "You've successfully logged in.",
       });
-      setLocation("/dashboard");
     },
     onError: (error: Error) => {
       toast({

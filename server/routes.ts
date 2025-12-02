@@ -237,6 +237,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // API lấy toàn bộ lịch sử ăn uống cho trang Tracker
+  app.get("/api/calories/entries", requireAuth, async (req, res) => {
+    try {
+      const userId = req.session.userId!;
+      const entries = await storage.getFoodEntriesByUser(userId);
+      
+      res.json(entries);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch food entries history" });
+    }
+  });
+
   // Analyze food image
   app.post("/api/food/analyzeByChatGPT", requireAuth, upload.single("image"), async (req, res) => {
     try {
