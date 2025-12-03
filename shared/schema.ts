@@ -46,7 +46,16 @@ export const chatMessages = pgTable("chat_messages", {
     timestamp: timestamp("timestamp").defaultNow().notNull(),
 });
 
-// Insert schemas
+// [MỚI] Bảng Recipes lưu công thức
+export const recipes = pgTable("recipes", {
+    id: varchar("id").primaryKey(),
+    mealName: text("meal_name").notNull().unique(),
+    data: text("data").notNull(), 
+    createdAt: timestamp("created_at").defaultNow(),
+});
+
+// --- INSERT SCHEMAS ---
+
 export const insertUserSchema = createInsertSchema(users, {
     username: z.string().min(3, "Username must be at least 3 characters"),
     password: z.string().min(6, "Password must be at least 6 characters"),
@@ -88,7 +97,17 @@ export const insertChatMessageSchema = createInsertSchema(chatMessages, {
     timestamp: true,
 });
 
-// Types
+// [SỬA LỖI Ở ĐÂY]: Thêm .omit({ id: true, createdAt: true })
+export const insertRecipeSchema = createInsertSchema(recipes, {
+    mealName: z.string(),
+    data: z.any(), 
+}).omit({
+    id: true,
+    createdAt: true,
+});
+
+// --- TYPES ---
+
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
 export type InsertFoodItem = z.infer<typeof insertFoodItemSchema>;
@@ -97,6 +116,10 @@ export type InsertFoodEntry = z.infer<typeof insertFoodEntrySchema>;
 export type FoodEntry = typeof foodEntries.$inferSelect;
 export type InsertChatMessage = z.infer<typeof insertChatMessageSchema>;
 export type ChatMessage = typeof chatMessages.$inferSelect;
+
+// Recipe types
+export type Recipe = typeof recipes.$inferSelect;
+export type InsertRecipe = z.infer<typeof insertRecipeSchema>;
 
 // Additional types for frontend
 export type UserProfile = Omit<User, 'password'> & {
