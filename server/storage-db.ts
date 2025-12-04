@@ -1,8 +1,13 @@
-// server/storage-db.ts
 import mysql from "mysql2/promise";
 import type { Pool } from "mysql2/promise";
 import { drizzle } from "drizzle-orm/mysql2";
-import type { InsertUser, User, InsertFoodEntry, FoodEntry, InsertFoodItem, FoodItem, ChatMessage, InsertChatMessage } from "@shared/schema";
+import type { 
+  InsertUser, User, 
+  InsertFoodEntry, FoodEntry, 
+  InsertFoodItem, FoodItem, 
+  ChatMessage, InsertChatMessage, 
+  Recipe, InsertRecipe 
+} from "@shared/schema";
 import type { IStorage } from "./storage";
 import { randomUUID } from "crypto";
 
@@ -11,26 +16,18 @@ let pool: Pool | null = null;
 
 function createMysqlPool(): Pool {
   if (!process.env.DATABASE_URL) {
-    throw new Error("DATABASE_URL environment variable is required for MySQL connection");
+    throw new Error("DATABASE_URL environment variable is required");
   }
   
   if (!pool) {
-    // Remove PostgreSQL-specific parameters from the connection string
+    // Tự động clean connection string nếu có tham số thừa của Postgres
     let connectionString = process.env.DATABASE_URL;
-    
     try {
       const url = new URL(connectionString);
       const paramsToRemove = ['sslmode', 'ssl', 'sslrootcert', 'sslcert', 'sslkey'];
-      
-      paramsToRemove.forEach(param => {
-        url.searchParams.delete(param);
-      });
-      
+      paramsToRemove.forEach(param => url.searchParams.delete(param));
       connectionString = url.toString();
-    } catch (error) {
-      // If URL parsing fails, use the original connection string
-      console.warn('Failed to parse DATABASE_URL, using as-is:', error);
-    }
+    } catch (e) { /* Ignore parsing error */ }
     
     pool = mysql.createPool({
       uri: connectionString,
@@ -39,14 +36,13 @@ function createMysqlPool(): Pool {
       queueLimit: 0,
     });
   }
-  
   return pool;
 }
 
-// Export drizzle instance for ORM usage
 export const db = drizzle(createMysqlPool());
 
-// Helper functions to map between MySQL snake_case and TypeScript camelCase
+// --- MAPPER FUNCTIONS (Database snake_case -> TypeScript camelCase) ---
+
 function mapUserFromDb(dbUser: any): User {
   if (!dbUser) return dbUser;
   return {
@@ -68,7 +64,7 @@ function mapFoodEntryFromDb(dbEntry: any): FoodEntry {
   return {
     id: dbEntry.id,
     userId: dbEntry.user_id,
-    foodName: dbEntry.food_name,
+    foodName: dbEntry.food_name, // Map từ Alias trong câu query JOIN
     calories: dbEntry.calories,
     weight: dbEntry.weight,
     imageUrl: dbEntry.image_url,
@@ -98,6 +94,8 @@ function mapChatMessageFromDb(dbMessage: any): ChatMessage {
   };
 }
 
+// --- MAIN STORAGE CLASS ---
+
 export class DbStorage implements IStorage {
   private getPool(): Pool {
     return createMysqlPool();
@@ -120,12 +118,28 @@ export class DbStorage implements IStorage {
 
   async createUser(user: InsertUser): Promise<User> {
     const pool = this.getPool();
-    const id = randomUUID();
+    const [rows] = await pool.query("SELECT id FROM users");
+    
+    let maxId = 0;
+    
+    if (Array.isArray(rows)) {
+      rows.forEach((row: any) => {
+        if (typeof row.id === 'string' && row.id.startsWith('u')) {
+          const num = parseInt(row.id.substring(1), 10);
+          if (!isNaN(num) && num > maxId) {
+            maxId = num;
+          }
+        }
+      });
+    }
+
+    const newId = `u${maxId + 1}`;
+
     await pool.query(
       `INSERT INTO users (id, username, password, name, age, gender, height, weight, goal, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
       [
-        id,
+        newId,
         user.username,
         user.password,
         user.name,
@@ -136,34 +150,24 @@ export class DbStorage implements IStorage {
         user.goal,
       ]
     );
-    const created = await this.getUser(id);
+
+    const created = await this.getUser(newId);
     if (!created) throw new Error("Create user failed");
     return created;
   }
 
   async updateUser(id: string, updates: Partial<InsertUser>): Promise<User> {
     const pool = this.getPool();
-    
-    // Filter out undefined values
     const validUpdates = Object.entries(updates).filter(([_, value]) => value !== undefined);
-    
     if (validUpdates.length === 0) {
       const user = await this.getUser(id);
       if (!user) throw new Error("User not found");
       return user;
     }
-    
     const fields = validUpdates.map(([key]) => `${key} = ?`).join(", ");
     const values = validUpdates.map(([_, value]) => value);
-    
-    await pool.query(
-      `UPDATE users SET ${fields} WHERE id = ?`,
-      [...values, id]
-    );
-    
-    const user = await this.getUser(id);
-    if (!user) throw new Error("User not found");
-    return user;
+    await pool.query(`UPDATE users SET ${fields} WHERE id = ?`, [...values, id]);
+    return (await this.getUser(id))!;
   }
 
   // === FOOD ENTRIES ===
@@ -171,9 +175,9 @@ export class DbStorage implements IStorage {
     const pool = this.getPool();
     const [rows] = await pool.query(
       `SELECT fe.*, fi.name as food_name 
-       FROM food_entries fe
-       LEFT JOIN food_items fi ON fe.food_id = fi.id
-       WHERE fe.id = ?`, 
+      FROM food_entries fe
+      LEFT JOIN food_items fi ON fe.food_id = fi.id
+      WHERE fe.id = ?`, 
       [id]
     );
     const data = Array.isArray(rows) ? rows[0] : undefined;
@@ -182,13 +186,12 @@ export class DbStorage implements IStorage {
 
   async getFoodEntriesByUser(userId: string): Promise<FoodEntry[]> {
     const pool = this.getPool();
-    // JOIN bảng food_entries với food_items để lấy tên món ăn (name as food_name)
     const [rows] = await pool.query(
       `SELECT fe.*, fi.name as food_name, fe.food_id 
-       FROM food_entries fe
-       LEFT JOIN food_items fi ON fe.food_id = fi.id
-       WHERE fe.user_id = ? 
-       ORDER BY fe.timestamp DESC`, 
+      FROM food_entries fe
+      LEFT JOIN food_items fi ON fe.food_id = fi.id
+      WHERE fe.user_id = ? 
+      ORDER BY fe.timestamp DESC`, 
       [userId]
     );
     return Array.isArray(rows) ? rows.map(mapFoodEntryFromDb) : [];
@@ -196,42 +199,24 @@ export class DbStorage implements IStorage {
 
   async createFoodEntry(entry: InsertFoodEntry): Promise<FoodEntry> {
     const pool = this.getPool();
-
-    // --- BƯỚC 1: Xử lý logic tạo ID mới (Format: f{userIdNum}_{sequence}) ---
     
-    // 1. Lấy phần số từ user_id (ví dụ: "u1" -> "1")
-    // Dùng regex để chỉ lấy số, phòng trường hợp id phức tạp hơn
+    // Logic tạo ID: f{userIdNum}_{sequence}
     const userIdNum = entry.userId.replace(/\D/g, '') || entry.userId; 
-
-    // 2. Lấy danh sách tất cả ID hiện có của user này để tìm số thứ tự lớn nhất
-    const [existingRows] = await pool.query(
-      "SELECT id FROM food_entries WHERE user_id = ?",
-      [entry.userId]
-    );
-
+    const [existingRows] = await pool.query("SELECT id FROM food_entries WHERE user_id = ?", [entry.userId]);
     let maxSequence = 0;
-
     if (Array.isArray(existingRows)) {
       existingRows.forEach((row: any) => {
-        // ID có dạng f1_10. Ta cần tách lấy phần sau dấu "_"
         const parts = row.id.split('_');
         if (parts.length === 2) {
           const sequence = parseInt(parts[1], 10);
-          // Kiểm tra nếu là số hợp lệ và lớn hơn max hiện tại thì cập nhật
-          if (!isNaN(sequence) && sequence > maxSequence) {
-            maxSequence = sequence;
-          }
+          if (!isNaN(sequence) && sequence > maxSequence) maxSequence = sequence;
         }
       });
     }
-
-    // 3. Tạo ID mới = f + userNum + _ + (maxSequence + 1)
     const newId = `f${userIdNum}_${maxSequence + 1}`;
 
-    // --- BƯỚC 2: Xử lý logic tìm food_id (giữ nguyên logic bài trước) ---
-
+    // Logic tìm/tạo foodItem
     let foodItem = await this.getFoodItemByName(entry.foodName);
-
     if (!foodItem) {
       foodItem = await this.createFoodItem({
         name: entry.foodName,
@@ -240,24 +225,13 @@ export class DbStorage implements IStorage {
       });
     }
 
-    // --- BƯỚC 3: Insert vào DB với ID mới ---
-
     await pool.query(
       `INSERT INTO food_entries (id, user_id, food_id, calories, image_url, diet_comment, timestamp)
-       VALUES (?, ?, ?, ?, ?, ?, NOW())`,
-      [
-        newId, // Sử dụng ID vừa tạo theo format f1_11
-        entry.userId,
-        foodItem.id,
-        entry.calories,
-        entry.imageUrl ?? null,
-        entry.dietComment ?? null,
-      ]
+      VALUES (?, ?, ?, ?, ?, ?, NOW())`,
+      [newId, entry.userId, foodItem.id, entry.calories, entry.imageUrl ?? null, entry.dietComment ?? null]
     );
 
-    const created = await this.getFoodEntry(newId);
-    if (!created) throw new Error("Create food entry failed");
-    return created;
+    return (await this.getFoodEntry(newId))!;
   }
 
   async deleteFoodEntry(id: string): Promise<boolean> {
@@ -285,18 +259,10 @@ export class DbStorage implements IStorage {
     const pool = this.getPool();
     const id = randomUUID();
     await pool.query(
-      `INSERT INTO food_items (id, name, calories_per_100g, advice)
-       VALUES (?, ?, ?, ?)`,
-      [
-        id,
-        item.name,
-        item.caloriesPer100g,
-        item.advice ?? "Good for your health.",
-      ]
+      `INSERT INTO food_items (id, name, calories_per_100g, advice) VALUES (?, ?, ?, ?)`,
+      [id, item.name, item.caloriesPer100g, item.advice ?? "Good for your health."]
     );
-    const created = await this.getFoodItem(id);
-    if (!created) throw new Error("Create food item failed");
-    return created;
+    return (await this.getFoodItem(id))!;
   }
 
   async getAllFoodItems(): Promise<FoodItem[]> {
@@ -319,25 +285,54 @@ export class DbStorage implements IStorage {
     const pool = this.getPool();
     const id = randomUUID();
     await pool.query(
-      `INSERT INTO chat_messages (id, user_id, role, content, timestamp)
-       VALUES (?, ?, ?, ?, NOW())`,
-      [
-        id,
-        message.userId,
-        message.role,
-        message.content,
-      ]
+      `INSERT INTO chat_messages (id, user_id, role, content, timestamp) VALUES (?, ?, ?, ?, NOW())`,
+      [id, message.userId, message.role, message.content]
     );
     const [rows] = await pool.query("SELECT * FROM chat_messages WHERE id = ?", [id]);
-    const data = Array.isArray(rows) ? rows[0] : undefined;
-    if (!data) throw new Error("Create chat message failed");
-    return mapChatMessageFromDb(data);
+    return mapChatMessageFromDb((rows as any)[0]);
   }
 
   async clearChatHistory(userId: string): Promise<boolean> {
     const pool = this.getPool();
     const [result] = await pool.query("DELETE FROM chat_messages WHERE user_id = ?", [userId]);
     return (result as any).affectedRows > 0;
+  }
+
+  // === RECIPES ===
+  async getRecipeByName(mealName: string): Promise<Recipe | undefined> {
+    const pool = this.getPool();
+    // Tìm kiếm chính xác tên món ăn trong bảng recipes
+    const [rows] = await pool.query("SELECT * FROM recipes WHERE meal_name = ?", [mealName]);
+    
+    // [SỬA LỖI GẠCH ĐỎ]: Thêm 'as any' vào rows[0]
+    const data = Array.isArray(rows) ? (rows[0] as any) : undefined;
+    
+    if (data) {
+      return {
+        id: data.id,
+        mealName: data.meal_name,
+        // Bây giờ TypeScript sẽ không báo lỗi ở data.data nữa
+        data: typeof data.data === 'string' ? JSON.parse(data.data) : data.data,
+        createdAt: data.created_at
+      };
+    }
+    return undefined;
+  }
+
+  async createRecipe(insertRecipe: InsertRecipe): Promise<Recipe> {
+    const pool = this.getPool();
+    const id = randomUUID();
+    const jsonData = JSON.stringify(insertRecipe.data);
+    await pool.query(
+      `INSERT INTO recipes (id, meal_name, data, created_at) VALUES (?, ?, ?, NOW())`,
+      [id, insertRecipe.mealName, jsonData]
+    );
+    return {
+      id,
+      mealName: insertRecipe.mealName,
+      data: insertRecipe.data,
+      createdAt: new Date()
+    };
   }
 }
 
