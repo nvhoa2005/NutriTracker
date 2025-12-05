@@ -164,7 +164,7 @@ export default function Dashboard() {
     if (!isHovered) {
       interval = setInterval(() => {
         nextSlide();
-      }, 3500); 
+      }, 2500); 
     }
 
     return () => clearInterval(interval);
