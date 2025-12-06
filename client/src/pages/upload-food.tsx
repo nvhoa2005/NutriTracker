@@ -10,7 +10,8 @@ import { useAuth } from "@/lib/auth-context";
 import { apiRequest } from "@/lib/queryClient";
 import { 
   Loader2, PlayCircle, Image as ImageIcon, Wand2, 
-  Pencil, Check, X as XIcon, MessageSquare, ChefHat, Clock, Utensils, CheckCircle2 
+  Pencil, Check, X as XIcon, MessageSquare, ChefHat, Clock, Utensils, CheckCircle2,
+  Eye // [MERGE]: Thêm icon Eye để xem Depth
 } from "lucide-react";
 import { CloudArrowUpIcon, InformationCircleIcon, ScaleIcon } from "@heroicons/react/24/outline";
 import {
@@ -23,7 +24,6 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { FoodEntry } from "@shared/schema";
 
-// Interface cho kết quả phân tích
 interface AnalysisResult {
   foodName: string;
   caloriesPer100g: number;
@@ -31,11 +31,11 @@ interface AnalysisResult {
   totalCalories: number;
   advice: string;
   annotatedData: string;
+  depthData?: string; // [MERGE]: Thêm trường này
   type: "image" | "video";
   detections: any[];
 }
 
-// Interface cho công thức món ăn (Recipe)
 interface RecipeData {
   description: string;
   ingredients: string[];
@@ -61,6 +61,9 @@ export default function UploadFood() {
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [processedVideoUrl, setProcessedVideoUrl] = useState<string | null>(null);
   
+  // [MERGE]: State bật tắt chế độ xem Depth
+  const [showDepth, setShowDepth] = useState(false);
+
   const [isEditing, setIsEditing] = useState(false);
   const [editedName, setEditedName] = useState("");
   const [editedWeight, setEditedWeight] = useState(0);
@@ -69,7 +72,6 @@ export default function UploadFood() {
   const [showAdvice, setShowAdvice] = useState(false);
   const [personalizedAdvice, setPersonalizedAdvice] = useState<string | null>(null);
   
-  // [NEW STATE] Cho tính năng xem Recipe
   const [selectedRecipeMeal, setSelectedRecipeMeal] = useState<string | null>(null);
   const [isRecipeDialogOpen, setIsRecipeDialogOpen] = useState(false);
   const [recipeData, setRecipeData] = useState<RecipeData | null>(null);
@@ -110,6 +112,7 @@ export default function UploadFood() {
       setEditedWeight(result.weight);
       setEditedCalories(result.totalCalories);
       setIsEditing(false);
+      setShowDepth(false); // Reset depth view khi có kết quả mới
     }
   }, [result]);
 
@@ -152,7 +155,6 @@ export default function UploadFood() {
     },
   });
 
-  // [NEW MUTATION] Gọi API lấy công thức món ăn
   const recipeMutation = useMutation({
     mutationFn: async (mealName: string) => {
       const res = await apiRequest<RecipeData>("POST", "/api/meals/recipe", { mealName });
@@ -167,10 +169,9 @@ export default function UploadFood() {
     }
   });
 
-  // [NEW HANDLER] Khi click vào một món ăn trong danh sách detection
   const handleRecipeClick = (mealName: string) => {
     setSelectedRecipeMeal(mealName);
-    setRecipeData(null); // Reset data cũ
+    setRecipeData(null);
     setIsRecipeDialogOpen(true);
     recipeMutation.mutate(mealName);
   };
@@ -201,15 +202,9 @@ export default function UploadFood() {
         setPersonalizedAdvice(finalAdvice); 
         setShowAdvice(true);
       }
-      // Kiểm tra nếu là Multi-item từ Vision Agent thì gửi danh sách
-      if (result?.detections && result.detections.length > 0) {
-        const payload = {
-          items: result.detections, 
-          dietComment: finalAdvice || "Vision Agent Analysis",
-        };
-        return await apiRequest("POST", "/api/food/entry", payload);
-      } else {
-        const entry = {
+      
+      if (isEditing || !result?.detections || result.detections.length === 0) {
+         const entry = {
           userId: user?.id,
           foodName: editedName,
           calories: editedCalories,
@@ -217,6 +212,12 @@ export default function UploadFood() {
           dietComment: finalAdvice,
         };
         return await apiRequest<FoodEntry>("POST", "/api/food/entry", entry);
+      } else {
+        const payload = {
+          items: result.detections, 
+          dietComment: finalAdvice || "Vision Agent Analysis",
+        };
+        return await apiRequest("POST", "/api/food/entry", payload);
       }
     },
     onSuccess: () => {
@@ -258,6 +259,7 @@ export default function UploadFood() {
     setShowAdvice(false);
     setPersonalizedAdvice(null);
     setIsEditing(false);
+    setShowDepth(false); // [MERGE]: Reset
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
@@ -266,7 +268,7 @@ export default function UploadFood() {
       <div>
         <h1 className="text-4xl font-bold font-['Poppins'] mb-2">Vision Agent</h1>
         <p className="text-base text-muted-foreground leading-relaxed">
-          Upload media and let the Agent analyze your meal. Click on detected items to see details.
+          Upload media and let the Agent analyze your meal. You can verify and correct the Agent's estimation.
         </p>
       </div>
 
@@ -299,7 +301,12 @@ export default function UploadFood() {
                       <div className="flex flex-col items-center gap-2"><Loader2 className="h-8 w-8 animate-spin text-primary" /><p className="text-sm text-muted-foreground">Rendering result...</p></div>
                     )
                   ) : (
-                    <img src={result.annotatedData} alt="Result" className="w-full max-h-[500px] object-contain" />
+                    // [MERGE]: Logic hiển thị ảnh thường hoặc ảnh Depth
+                    <img 
+                      src={showDepth && result.depthData ? result.depthData : result.annotatedData} 
+                      alt="Result" 
+                      className="w-full max-h-[500px] object-contain transition-all duration-300" 
+                    />
                   )
                 ) : (
                   fileType === "video" ? (
@@ -307,6 +314,22 @@ export default function UploadFood() {
                   ) : (
                     <img src={previewUrl} alt="Preview" className="w-full max-h-[500px] object-contain" />
                   )
+                )}
+
+                {/* [MERGE]: Nút bật/tắt Depth Vision (Chỉ hiện khi là ảnh) */}
+                {result && result.type === "image" && result.depthData && (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    className="absolute top-4 right-4 bg-white/90 hover:bg-white shadow-md z-10"
+                    onClick={() => setShowDepth(!showDepth)}
+                  >
+                    {showDepth ? (
+                      <><ImageIcon className="w-4 h-4 mr-2"/> Original View</>
+                    ) : (
+                      <><Eye className="w-4 h-4 mr-2"/> Depth Vision</>
+                    )}
+                  </Button>
                 )}
               </div>
               
@@ -365,7 +388,7 @@ export default function UploadFood() {
                         </Button>
                       </div>
 
-                      {/* [PHASE 4] Clickable Detections List */}
+                      {/* Clickable Detections List */}
                       {result.detections && result.detections.length > 0 && (
                         <div className="text-sm text-muted-foreground">
                           <p className="mb-2 text-xs font-medium uppercase tracking-wider opacity-70">Detected Items (Click to view info)</p>
@@ -432,11 +455,10 @@ export default function UploadFood() {
         </CardContent>
       </Card>
 
-      {/* [NEW] Recipe Detail Dialog */}
+      {/* Recipe Detail Dialog */}
       <Dialog open={isRecipeDialogOpen} onOpenChange={setIsRecipeDialogOpen}>
         <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col p-0 gap-0 overflow-hidden bg-background">
           <div className="relative h-32 w-full shrink-0 bg-muted flex items-center justify-center overflow-hidden">
-             {/* Dùng ảnh từ result để làm nền mờ */}
              {result?.annotatedData && (
                 <img src={result.annotatedData} className="absolute inset-0 w-full h-full object-cover opacity-20 blur-md" alt="" />
              )}
