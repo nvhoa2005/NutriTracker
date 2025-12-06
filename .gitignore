@@ -47,3 +47,5 @@ Desktop.ini
 
 venv/
 __pycache__
+
+*.pt
