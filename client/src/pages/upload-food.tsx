@@ -11,7 +11,7 @@ import { apiRequest } from "@/lib/queryClient";
 import { 
   Loader2, PlayCircle, Image as ImageIcon, Wand2, 
   Pencil, Check, X as XIcon, MessageSquare, ChefHat, Clock, Utensils, CheckCircle2,
-  Eye, ScanLine, Lightbulb
+  Eye, ScanLine, Lightbulb 
 } from "lucide-react";
 import { CloudArrowUpIcon, InformationCircleIcon, ScaleIcon } from "@heroicons/react/24/outline";
 import {
@@ -189,6 +189,7 @@ export default function UploadFood() {
     },
   });
 
+  // [SỬA ĐỔI QUAN TRỌNG]: Logic chia nhỏ món ăn khi lưu
   const addToTrackerMutation = useMutation({
     mutationFn: async () => {
       let finalAdvice = personalizedAdvice;
@@ -201,8 +202,44 @@ export default function UploadFood() {
         setPersonalizedAdvice(finalAdvice); 
         setShowAdvice(true);
       }
-      
-      if (isEditing || !result?.detections || result.detections.length === 0) {
+
+      // 1. Nếu có danh sách món ăn từ Vision Agent (Detect > 0)
+      if (result?.detections && result.detections.length > 0) {
+        // Tính tổng Ratio của các món
+        const totalRatio = result.detections.reduce((sum, d) => sum + (d.box_ratio || 0), 0);
+        
+        // Tạo danh sách các món mới dựa trên tổng cân nặng hiện tại (editedWeight)
+        // Điều này đảm bảo nếu user sửa tổng cân nặng, từng món con cũng được chia lại đúng tỷ lệ
+        const itemsToSave = result.detections.map(det => {
+           let itemWeight = 0;
+           if (totalRatio > 0) {
+             // Chia tỷ lệ: (Ratio Món / Tổng Ratio) * Tổng Cân Nặng Người Dùng Nhập/Edit
+             itemWeight = (det.box_ratio / totalRatio) * editedWeight;
+           }
+           
+           // Tính lại calo cho món đó
+           // Calo = (Weight Mới / Weight Cũ của món) * Calo Cũ của món
+           // Hoặc an toàn hơn: (Weight Mới * CaloPer100g) / 100 (nhưng ta không có caloPer100g ở đây, nên dùng tỷ lệ)
+           const itemCalorie = det.estimated_weight > 0 
+              ? Math.round((itemWeight / det.estimated_weight) * det.estimated_calories)
+              : 0;
+
+           return {
+             ...det,
+             foodName: det.class,
+             weight: Math.round(itemWeight),
+             calories: itemCalorie
+           };
+        });
+
+        const payload = {
+          items: itemsToSave, 
+          dietComment: finalAdvice || "Vision Agent Analysis",
+        };
+        return await apiRequest("POST", "/api/food/entry", payload);
+      } 
+      // 2. Fallback: Nếu không detect được gì cụ thể (hoặc lỗi), lưu 1 cục
+      else {
          const entry = {
           userId: user?.id,
           foodName: editedName,
@@ -211,17 +248,11 @@ export default function UploadFood() {
           dietComment: finalAdvice,
         };
         return await apiRequest<FoodEntry>("POST", "/api/food/entry", entry);
-      } else {
-        const payload = {
-          items: result.detections, 
-          dietComment: finalAdvice || "Vision Agent Analysis",
-        };
-        return await apiRequest("POST", "/api/food/entry", payload);
       }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/calories/daily"] });
-      toast({ title: "Success!", description: "Added to your diary." });
+      toast({ title: "Success!", description: "All detected items added to diary separately." });
       handleReset();
     },
     onError: (error: Error) => {
@@ -311,7 +342,7 @@ export default function UploadFood() {
               {/* Media Display & Scanning Effect */}
               <div className="relative rounded-xl overflow-hidden shadow-lg bg-black/5 min-h-[300px] flex items-center justify-center group">
                 
-                {/* [SCANNING EFFECT] Chỉ hiện khi đang xử lý */}
+                {/* Scanning Effect */}
                 {analyzeMutation.isPending && (
                   <div className="absolute inset-0 z-20 pointer-events-none">
                     <div className="absolute inset-0 bg-black/10 backdrop-blur-[1px]" />
@@ -418,6 +449,7 @@ export default function UploadFood() {
                         </Button>
                       </div>
 
+                      {/* Clickable Detections List */}
                       {result.detections && result.detections.length > 0 && (
                         <div className="text-sm text-muted-foreground">
                           <p className="mb-2 text-xs font-medium uppercase tracking-wider opacity-70">Detected Items (Click to view info)</p>
@@ -426,7 +458,7 @@ export default function UploadFood() {
                               <li 
                                 key={i} 
                                 className="bg-white px-3 py-1.5 rounded-full shadow-sm border border-border/50 text-xs flex gap-2 items-center cursor-pointer hover:bg-primary/5 hover:border-primary transition-all group"
-                                onClick={() => handleRecipeClick(d.class)}
+                                onClick={() => handleRecipeClick(d.class)} 
                               >
                                 <span className="font-semibold text-foreground group-hover:text-primary">{d.class}</span>
                                 {d.estimated_weight > 0 && <span className="text-muted-foreground">~{d.estimated_weight}g</span>}
