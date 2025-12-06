@@ -11,7 +11,7 @@ import { apiRequest } from "@/lib/queryClient";
 import { 
   Loader2, PlayCircle, Image as ImageIcon, Wand2, 
   Pencil, Check, X as XIcon, MessageSquare, ChefHat, Clock, Utensils, CheckCircle2,
-  Eye // [MERGE]: Thêm icon Eye để xem Depth
+  Eye, ScanLine // Thêm icon ScanLine
 } from "lucide-react";
 import { CloudArrowUpIcon, InformationCircleIcon, ScaleIcon } from "@heroicons/react/24/outline";
 import {
@@ -31,7 +31,7 @@ interface AnalysisResult {
   totalCalories: number;
   advice: string;
   annotatedData: string;
-  depthData?: string; // [MERGE]: Thêm trường này
+  depthData?: string;
   type: "image" | "video";
   detections: any[];
 }
@@ -61,7 +61,6 @@ export default function UploadFood() {
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [processedVideoUrl, setProcessedVideoUrl] = useState<string | null>(null);
   
-  // [MERGE]: State bật tắt chế độ xem Depth
   const [showDepth, setShowDepth] = useState(false);
 
   const [isEditing, setIsEditing] = useState(false);
@@ -112,7 +111,7 @@ export default function UploadFood() {
       setEditedWeight(result.weight);
       setEditedCalories(result.totalCalories);
       setIsEditing(false);
-      setShowDepth(false); // Reset depth view khi có kết quả mới
+      setShowDepth(false);
     }
   }, [result]);
 
@@ -259,12 +258,25 @@ export default function UploadFood() {
     setShowAdvice(false);
     setPersonalizedAdvice(null);
     setIsEditing(false);
-    setShowDepth(false); // [MERGE]: Reset
+    setShowDepth(false);
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
   return (
     <div className="max-w-4xl mx-auto space-y-8">
+      {/* CSS Animation cho hiệu ứng Scan */}
+      <style>{`
+        @keyframes scan-vertical {
+          0% { top: 0%; opacity: 0; }
+          10% { opacity: 1; }
+          90% { opacity: 1; }
+          100% { top: 100%; opacity: 0; }
+        }
+        .scanning-line {
+          animation: scan-vertical 2s linear infinite;
+        }
+      `}</style>
+
       <div>
         <h1 className="text-4xl font-bold font-['Poppins'] mb-2">Vision Agent</h1>
         <p className="text-base text-muted-foreground leading-relaxed">
@@ -291,8 +303,29 @@ export default function UploadFood() {
             </div>
           ) : (
             <div className="space-y-8">
-              {/* Media Display */}
-              <div className="relative rounded-xl overflow-hidden shadow-lg bg-black/5 min-h-[300px] flex items-center justify-center">
+              {/* Media Display & Scanning Effect */}
+              <div className="relative rounded-xl overflow-hidden shadow-lg bg-black/5 min-h-[300px] flex items-center justify-center group">
+                
+                {/* [SCANNING EFFECT] Chỉ hiện khi đang xử lý */}
+                {analyzeMutation.isPending && (
+                  <div className="absolute inset-0 z-20 pointer-events-none">
+                    {/* Lớp phủ mờ */}
+                    <div className="absolute inset-0 bg-black/10 backdrop-blur-[1px]" />
+                    
+                    {/* Thanh quét Laser */}
+                    <div className="absolute left-0 right-0 h-1 bg-gradient-to-r from-transparent via-cyan-400 to-transparent shadow-[0_0_15px_rgba(34,211,238,0.8)] scanning-line z-30" />
+                    
+                    {/* Lưới Grid */}
+                    <div className="absolute inset-0 bg-[linear-gradient(rgba(0,255,255,0.1)_1px,transparent_1px),linear-gradient(90deg,rgba(0,255,255,0.1)_1px,transparent_1px)] bg-[size:40px_40px] z-20" />
+                    
+                    {/* Text Loading */}
+                    <div className="absolute bottom-4 right-4 bg-black/70 text-cyan-400 px-3 py-1.5 rounded-full text-xs font-mono flex items-center gap-2 animate-pulse z-30">
+                      <ScanLine className="h-3 w-3" />
+                      ANALYZING PIXELS...
+                    </div>
+                  </div>
+                )}
+
                 {result ? (
                   result.type === "video" ? (
                     processedVideoUrl ? (
@@ -301,7 +334,6 @@ export default function UploadFood() {
                       <div className="flex flex-col items-center gap-2"><Loader2 className="h-8 w-8 animate-spin text-primary" /><p className="text-sm text-muted-foreground">Rendering result...</p></div>
                     )
                   ) : (
-                    // [MERGE]: Logic hiển thị ảnh thường hoặc ảnh Depth
                     <img 
                       src={showDepth && result.depthData ? result.depthData : result.annotatedData} 
                       alt="Result" 
@@ -316,7 +348,7 @@ export default function UploadFood() {
                   )
                 )}
 
-                {/* [MERGE]: Nút bật/tắt Depth Vision (Chỉ hiện khi là ảnh) */}
+                {/* Nút bật/tắt Depth Vision */}
                 {result && result.type === "image" && result.depthData && (
                   <Button
                     variant="secondary"
@@ -355,7 +387,7 @@ export default function UploadFood() {
 
                   <div className="flex gap-4 justify-center">
                     <Button onClick={() => analyzeMutation.mutate()} disabled={analyzeMutation.isPending} className="h-12 px-8 rounded-lg font-semibold min-w-[200px]">
-                      {analyzeMutation.isPending ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Analyzing...</> : <><ImageIcon className="mr-2 h-4 w-4"/> Analyze {fileType === "video" ? "Video" : "Image"}</>}
+                      {analyzeMutation.isPending ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Processing...</> : <><ImageIcon className="mr-2 h-4 w-4"/> Analyze {fileType === "video" ? "Video" : "Image"}</>}
                     </Button>
                     <Button variant="outline" onClick={handleReset} className="h-12 px-8 rounded-lg font-semibold">Cancel</Button>
                   </div>
