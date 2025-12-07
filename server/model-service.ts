@@ -1,51 +1,132 @@
 import fetch from 'node-fetch';
 import FormData from 'form-data';
 
-// Địa chỉ server FastAPI của bạn
-const EFFICIENTNET_API_URL = "http://127.0.0.1:8000/predict";
+const MODEL_API_URL = "http://127.0.0.1:8000/predict";
 
-/**
- * Phân tích ảnh món ăn bằng model EfficientNet-B1 (API Python).
- * Đầu vào là Buffer ảnh thô (từ req.file.buffer).
- * Đầu ra giống hệt hàm analyzeFoodImageByChatGPT.
- */
-export async function analyzeFoodImageByEfficientnetB1Model(
-  imageBuffer: Buffer
-): Promise<{ foodName: string; confidence: number }> {
+interface YoloResponse {
+  type: "image" | "video";
+  detections: Array<{
+    class: string;
+    confidence: number;
+    box_ratio: number;
+  }>;
+  count: number;
+  annotated_data: string;
+  depth_data?: string; 
+}
+
+const CALORIE_DB: Record<string, number> = {
+  "apple": 52, "banana": 89, "orange": 47, "broccoli": 34, "carrot": 41,
+  "pizza": 266, "hot dog": 290, "hamburger": 295, "sandwich": 250,
+  "donut": 452, "cake": 371, "bowl": 130,
+  "cup": 50, "bottle": 0, "person": 0, "default": 150
+};
+
+function estimateWeightFromVolume(volumeScore: number): number {
+  const DENSITY_FACTOR = 35.0; 
+  
+  let weight = volumeScore * DENSITY_FACTOR;
+  
+  if (weight < 20) weight = 20;    
+  if (weight > 1200) weight = 1200; 
+  
+  return Math.round(weight);
+}
+
+export async function analyzeFoodImageByYOLO(
+  fileBuffer: Buffer,
+  mimeType: string,
+  useAutoWeight: boolean,
+  totalManualWeight: number = 0
+): Promise<{ 
+  foodName: string; 
+  confidence: number; 
+  detections: Array<{ 
+    class: string; 
+    confidence: number; 
+    box_ratio: number;
+    estimated_weight: number;
+    estimated_calories: number;
+  }>;
+  annotatedData: string;
+  depthData?: string;
+  type: "image" | "video";
+  totalCalories: number;
+  totalWeight: number;
+}> {
   try {
-    // 1. Tạo FormData để gửi file
     const form = new FormData();
-    // 'file' phải khớp với tên tham số (File(...)) trên server FastAPI
-    // Cung cấp một tên file giả, ví dụ 'image.jpg', vì Buffer không có tên
-    form.append("file", imageBuffer, "image.jpg");
+    const filename = mimeType.startsWith('video') ? 'video.mp4' : 'image.jpg';
+    form.append("file", fileBuffer, { filename, contentType: mimeType });
 
-    // 2. Gọi API Python
-    const response = await fetch(EFFICIENTNET_API_URL, {
-      method: "POST",
-      body: form,
-      // Headers (Content-Type) sẽ được 'form-data' tự động thêm vào
-    });
+    const response = await fetch(MODEL_API_URL, { method: "POST", body: form });
 
     if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`API model trả về lỗi ${response.status}: ${errorText}`);
+      throw new Error(`API model error: ${await response.text()}`);
     }
 
-    // 3. Phân tích kết quả JSON
-    const result: {
-      predicted_class: string;
-      confidence: string; // API của chúng ta trả về string, cần convert
-      all_probabilities: Record<string, number>;
-    } = (await response.json()) as any;
+    const result = (await response.json()) as YoloResponse;
 
-    // 4. Trả về kết quả theo định dạng chuẩn
+    let processedDetections = [];
+    let totalMealCalories = 0;
+    let totalMealWeight = 0;
+    let maxConfidence = 0;
+
+    const validDetections = result.detections.filter(d => d.class !== 'person');
+    
+    const totalVolumeScore = validDetections.reduce((sum, det) => sum + det.box_ratio, 0);
+
+    for (const det of validDetections) {
+      const calPer100g = CALORIE_DB[det.class] || CALORIE_DB["default"];
+      let weight = 0;
+
+      if (useAutoWeight) {
+        weight = estimateWeightFromVolume(det.box_ratio);
+      } else {
+        if (totalVolumeScore > 0) {
+          weight = (det.box_ratio / totalVolumeScore) * totalManualWeight;
+        }
+      }
+      
+      weight = Math.round(weight);
+      const calories = Math.round((weight * calPer100g) / 100);
+      
+      totalMealCalories += calories;
+      totalMealWeight += weight;
+
+      processedDetections.push({
+        ...det,
+        estimated_weight: weight,
+        estimated_calories: calories
+      });
+
+      if (det.confidence > maxConfidence) {
+        maxConfidence = det.confidence;
+      }
+    }
+
+    let mainFoodName = "Unknown Food";
+
+    if (processedDetections.length === 0) {
+      mainFoodName = "No Food Detected";
+    } else {
+      const allNames = processedDetections.map(d => d.class);
+      const uniqueNames = Array.from(new Set(allNames));
+      mainFoodName = uniqueNames.join(", ");
+    }
+
     return {
-      foodName: result.predicted_class,
-      confidence: parseFloat(result.confidence) || 0.9, // Chuyển "0.9876" thành 0.9876
+      foodName: mainFoodName,
+      confidence: maxConfidence,
+      detections: processedDetections,
+      annotatedData: result.annotated_data,
+      depthData: result.depth_data, 
+      type: result.type,
+      totalCalories: totalMealCalories,
+      totalWeight: totalMealWeight
     };
+
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : "Unknown error";
-    // Ném lỗi để endpoint API có thể bắt được
-    throw new Error("Failed to analyze food image with EfficientNet: " + errorMessage);
+    throw new Error("Analysis failed: " + (error instanceof Error ? error.message : "Unknown error"));
   }
 }
