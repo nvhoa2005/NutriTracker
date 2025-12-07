@@ -16,13 +16,12 @@ import {
   generatePersonalizedFoodAdvice, 
   generateMealRecipe 
 } from "./openai-service";
-import { analyzeFoodImageByEfficientnetB1Model } from "./model-service";
+import { analyzeFoodImageByYOLO } from "./model-service";
 import { getChatbotResponse } from "./chatbot";
 import { z } from "zod";
 
 const upload = multer({ storage: multer.memoryStorage() });
 
-// Middleware kiểm tra login
 function requireAuth(req: Request, res: Response, next: NextFunction) {
   if (!req.session.userId) {
     return res.status(401).json({ message: "Authentication required" });
@@ -30,7 +29,6 @@ function requireAuth(req: Request, res: Response, next: NextFunction) {
   next();
 }
 
-// === Helper tính BMI ===
 function calculateBMI(weight: number, height: number) {
   const bmi = weight / Math.pow(height / 100, 2);
   let bmiStatus: "underweight" | "normal" | "overweight" | "obese";
@@ -41,7 +39,6 @@ function calculateBMI(weight: number, height: number) {
   return { bmi, bmiStatus };
 }
 
-// === Helper tính lượng calo cần ===
 function calculateCalorieGoal(user: UserProfile) {
   const base = 10 * user.weight + 6.25 * user.height - 5 * user.age + (user.gender === "male" ? 5 : -161);
   const tdee = base * 1.55;
@@ -50,7 +47,6 @@ function calculateCalorieGoal(user: UserProfile) {
   return Math.round(tdee);
 }
 
-// === Helper functions ===
 async function estimateCaloriesPerGram(foodName: string): Promise<number> {
   const commonFoods: Record<string, number> = {
     "rice": 130, "chicken": 165, "beef": 250, "pork": 242,
@@ -70,7 +66,6 @@ async function estimateCaloriesPerGram(foodName: string): Promise<number> {
 
 export async function registerRoutes(app: Express): Promise<Server> {
   
-  // === AUTHENTICATION ===
   app.post("/api/auth/register", async (req, res) => {
     try {
       const validatedData = insertUserSchema.parse(req.body);
@@ -119,7 +114,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     });
   });
 
-  // === USER PROFILE ===
   app.get("/api/user/profile", requireAuth, async (req, res) => {
     try {
       const user = await storage.getUser(req.session.userId!);
@@ -146,7 +140,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // === CALORIES & TRACKER ===
   app.get("/api/calories/daily", requireAuth, async (req, res) => {
     try {
       const user = await storage.getUser(req.session.userId!);
@@ -176,7 +169,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // API lấy toàn bộ lịch sử cho Tracker
   app.get("/api/calories/entries", requireAuth, async (req, res) => {
     try {
       const userId = req.session.userId!;
@@ -187,39 +179,48 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // === FOOD ANALYSIS & ENTRY ===
-  
-  // 1. Analyze by Model (EfficientNet - Ưu tiên dùng cái này)
   app.post("/api/food/analyzeByModel", requireAuth, upload.single("image"), async (req, res) => {
     try {
-      if (!req.file) return res.status(400).json({ message: "No image uploaded" });
+      if (!req.file) return res.status(400).json({ message: "No file uploaded" });
 
-      const weight = req.body.weight ? parseFloat(req.body.weight) : 100;
-      const { foodName } = await analyzeFoodImageByEfficientnetB1Model(req.file.buffer);
+      const weight = req.body.weight ? parseFloat(req.body.weight) : 0;
+      const useAutoWeight = req.body.useAutoWeight === "true"; 
+      
+      const analysisResult = await analyzeFoodImageByYOLO(
+        req.file.buffer, 
+        req.file.mimetype,
+        useAutoWeight,
+        weight
+      );
+
+      const foodName = analysisResult.foodName;
 
       let foodItem = await storage.getFoodItemByName(foodName);
       if (!foodItem) {
         const advice = await generateFoodAdvice(foodName);
-        const caloriesPer100g = await estimateCaloriesPerGram(foodName);
-        foodItem = await storage.createFoodItem({ name: foodName, caloriesPer100g, advice });
+        foodItem = await storage.createFoodItem({ name: foodName, caloriesPer100g: 0, advice });
       }
 
-      const totalCalories = Math.round((foodItem.caloriesPer100g * weight) / 100);
+      const totalCalories = analysisResult.totalCalories;
 
-      const result: FoodAnalysisResult = {
+      const result = {
         foodName: foodItem.name,
-        caloriesPer100g: foodItem.caloriesPer100g,
-        weight,
-        totalCalories,
-        advice: foodItem.advice || "Good for your health."
+        caloriesPer100g: 0,
+        weight: useAutoWeight ? analysisResult.totalWeight : weight, 
+        totalCalories, 
+        advice: foodItem.advice || "Good for your health.",
+        annotatedData: analysisResult.annotatedData,
+        depthData: analysisResult.depthData,
+        type: analysisResult.type,
+        detections: analysisResult.detections 
       };
+      
       res.json(result);
     } catch (error: any) {
-      res.status(500).json({ message: "Failed to analyze food: " + error.message });
+      res.status(500).json({ message: "Failed to analyze: " + error.message });
     }
   });
 
-  // 2. Analyze by ChatGPT (Fallback)
   app.post("/api/food/analyzeByChatGPT", requireAuth, upload.single("image"), async (req, res) => {
     try {
       if (!req.file) return res.status(400).json({ message: "No image uploaded" });
@@ -248,7 +249,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // 3. Review Personalized (Nút Review Food)
   app.post("/api/food/review-personalized", requireAuth, async (req, res) => {
     try {
       const { foodName, calories } = req.body;
@@ -268,47 +268,62 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // 4. Add Entry to Database
   app.post("/api/food/entry", requireAuth, async (req, res) => {
     try {
-      const validatedData = insertFoodEntrySchema.parse({
-        ...req.body,
-        userId: req.session.userId,
-      });
-      const entry = await storage.createFoodEntry(validatedData);
-      res.json(entry);
+      const userId = req.session.userId;
+      const body = req.body;
+
+      if (body.items && Array.isArray(body.items) && body.items.length > 0) {
+        const results = [];
+        
+        for (const item of body.items) {
+          const entryData = insertFoodEntrySchema.parse({
+            userId,
+            foodName: item.class || item.foodName,
+            calories: item.estimated_calories || item.calories,
+            weight: item.estimated_weight || item.weight,
+            dietComment: body.dietComment, 
+          });
+          const saved = await storage.createFoodEntry(entryData);
+          results.push(saved);
+        }
+        return res.json({ message: "Multi-item meal added", entries: results });
+      
+      } else {
+        const validatedData = insertFoodEntrySchema.parse({
+          ...body,
+          userId,
+        });
+        const entry = await storage.createFoodEntry(validatedData);
+        return res.json(entry);
+      }
+
     } catch (error: any) {
       if (error instanceof z.ZodError) return res.status(400).json({ message: error.errors[0].message });
-      res.status(500).json({ message: "Failed to create food entry" });
+      res.status(500).json({ message: "Failed to create food entry: " + error.message });
     }
   });
 
-  // === MEAL SUGGESTIONS & RECIPES ===
   app.get("/api/meals/suggestions", requireAuth, async (_req, res) => {
-    res.json([]); // Frontend đã có danh sách mặc định
+    res.json([]); 
   });
 
-  // [CACHE STRATEGY] API lấy chi tiết công thức món ăn
   app.post("/api/meals/recipe", requireAuth, async (req, res) => {
     try {
       const { mealName } = req.body;
       if (!mealName) return res.status(400).json({ message: "Meal name is required" });
 
-      // B1: Check Database (Cache Hit)
       const existingRecipe = await storage.getRecipeByName(mealName);
       if (existingRecipe) {
         console.log(`[CACHE HIT] Found recipe for: ${mealName}`);
         return res.json(existingRecipe.data);
       }
 
-      // B2: Call OpenAI (Cache Miss)
       console.log(`[CACHE MISS] Calling OpenAI for: ${mealName}`);
       const recipeData = await generateMealRecipe(mealName);
 
-      // B3: Save to Database
       await storage.createRecipe({ mealName, data: recipeData });
 
-      // B4: Return Result
       res.json(recipeData);
     } catch (error) {
       console.error("Recipe API Error:", error);
@@ -316,7 +331,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // === CHATBOT ===
   app.get("/api/chat/messages", requireAuth, async (req, res) => {
     try {
       const messages = await storage.getChatMessagesByUser(req.session.userId!);
@@ -335,7 +349,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const userMessage = await storage.createChatMessage({ userId, role: "user", content });
       
-      // Lấy full history để gửi kèm cho bot nhớ ngữ cảnh
       const chatHistory = await storage.getChatMessagesByUser(userId);
       const botResponse = await getChatbotResponse(content, user, chatHistory);
 
