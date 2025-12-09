@@ -9,7 +9,6 @@ import path from "path";
 
 const app = express();
 
-// Session configuration
 const SessionStore = MemoryStore(session);
 app.use(
   session({
@@ -17,13 +16,13 @@ app.use(
     resave: false,
     saveUninitialized: false,
     store: new SessionStore({
-      checkPeriod: 86400000, // prune expired entries every 24h
+      checkPeriod: 86400000, 
     }),
     cookie: {
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+      maxAge: 7 * 24 * 60 * 60 * 1000, 
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
-      sameSite: "strict", // CSRF protection
+      sameSite: "strict", 
     },
   })
 );
@@ -77,10 +76,8 @@ app.use((req, res, next) => {
   next();
 });
 
-// === Serve static images from attached_assets/generated_images ===
 const generatedImagesPath = path.join(process.cwd(), "attached_assets", "generated_images");
 
-// Kiểm tra xem thư mục tồn tại không
 import fs from "fs";
 if (fs.existsSync(generatedImagesPath)) {
   app.use("/generated_images", express.static(generatedImagesPath));
@@ -100,19 +97,12 @@ if (fs.existsSync(generatedImagesPath)) {
     throw err;
   });
 
-  // importantly only setup vite in development and after
-  // setting up all the other routes so the catch-all route
-  // doesn't interfere with the other routes
   if (app.get("env") === "development") {
     await setupVite(app, server);
   } else {
     serveStatic(app);
   }
 
-  // ALWAYS serve the app on the port specified in the environment variable PORT
-  // Other ports are firewalled. Default to 5000 if not specified.
-  // this serves both the API and the client.
-  // It is the only port that is not firewalled.
   const port = parseInt(process.env.PORT || '5000', 10);
   server.listen({
     port,
