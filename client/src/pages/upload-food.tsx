@@ -10,10 +10,10 @@ import { useAuth } from "@/lib/auth-context";
 import { apiRequest } from "@/lib/queryClient";
 import { 
   Loader2, PlayCircle, Image as ImageIcon, Wand2, 
-  Pencil, Check, X as XIcon, MessageSquare, ChefHat, Clock, Utensils, CheckCircle2,
-  Eye, ScanLine, Lightbulb 
+  Pencil, Check, X as XIcon, MessageSquare, 
+  DollarSign, HeartPulse, Sparkles, Info, Eye, ScanLine, Lightbulb, Scale
 } from "lucide-react";
-import { CloudArrowUpIcon, InformationCircleIcon, ScaleIcon } from "@heroicons/react/24/outline";
+import { CloudArrowUpIcon, InformationCircleIcon } from "@heroicons/react/24/outline";
 import {
   Dialog,
   DialogContent,
@@ -31,23 +31,22 @@ interface AnalysisResult {
   totalCalories: number;
   advice: string;
   annotatedData: string;
-  depthData?: string;
+  depthData?: string; 
   type: "image" | "video";
   detections: any[];
 }
 
-interface RecipeData {
-  description: string;
-  ingredients: string[];
-  instructions: string[];
+interface FoodDetailData {
+  calories_100g: number;
+  avg_price: string;
+  health_benefit: string;
+  personalized_advice: string;
+  suggestions: string[];
   macros: {
-    calories: number;
     protein: string;
     carbs: string;
     fat: string;
   };
-  cookingTime: string;
-  difficulty: string;
 }
 
 export default function UploadFood() {
@@ -73,7 +72,7 @@ export default function UploadFood() {
   
   const [selectedRecipeMeal, setSelectedRecipeMeal] = useState<string | null>(null);
   const [isRecipeDialogOpen, setIsRecipeDialogOpen] = useState(false);
-  const [recipeData, setRecipeData] = useState<RecipeData | null>(null);
+  const [recipeData, setRecipeData] = useState<FoodDetailData | null>(null);
 
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -84,7 +83,7 @@ export default function UploadFood() {
     if (result && result.type === "video" && result.annotatedData) {
       try {
         const header = result.annotatedData.split(';')[0];
-        const mimeType = header.split(':')[1];
+        const mimeType = header.split(':')[1] || 'video/mp4';
         const base64Data = result.annotatedData.split(',')[1];
         const byteCharacters = atob(base64Data);
         const byteNumbers = new Array(byteCharacters.length);
@@ -111,7 +110,7 @@ export default function UploadFood() {
       setEditedWeight(result.weight);
       setEditedCalories(result.totalCalories);
       setIsEditing(false);
-      setShowDepth(false);
+      setShowDepth(false); 
     }
   }, [result]);
 
@@ -130,9 +129,8 @@ export default function UploadFood() {
       const formData = new FormData();
       formData.append("image", selectedFile);
       formData.append("useAutoWeight", useAutoWeight.toString());
-      if (!useAutoWeight) {
-        formData.append("weight", weight);
-      }
+      if (!useAutoWeight) formData.append("weight", weight);
+      
       const response = await apiRequest<AnalysisResult>("POST", "/api/food/analyzeByModel", formData);
       return response;
     },
@@ -140,30 +138,23 @@ export default function UploadFood() {
       setResult(data);
       setShowAdvice(false);
       setPersonalizedAdvice(null);
-      toast({
-        title: "Analysis Complete!",
-        description: `Agent detected: ${data.foodName}`,
-      });
+      toast({ title: "Analysis Complete!", description: `Agent detected: ${data.foodName}` });
     },
     onError: (error: Error) => {
-      toast({
-        title: "Analysis failed",
-        description: error.message || "Please try again.",
-        variant: "destructive",
-      });
+      toast({ title: "Analysis failed", description: error.message, variant: "destructive" });
     },
   });
 
   const recipeMutation = useMutation({
     mutationFn: async (mealName: string) => {
-      const res = await apiRequest<RecipeData>("POST", "/api/meals/recipe", { mealName });
+      const res = await apiRequest<FoodDetailData>("POST", "/api/meals/recipe", { mealName });
       return res;
     },
     onSuccess: (data) => {
       setRecipeData(data);
     },
     onError: () => {
-      toast({ title: "Failed to load recipe", variant: "destructive" });
+      toast({ title: "Failed to load details", variant: "destructive" });
       setIsRecipeDialogOpen(false);
     }
   });
@@ -189,7 +180,6 @@ export default function UploadFood() {
     },
   });
 
-  // [SỬA ĐỔI QUAN TRỌNG]: Logic chia nhỏ món ăn khi lưu
   const addToTrackerMutation = useMutation({
     mutationFn: async () => {
       let finalAdvice = personalizedAdvice;
@@ -202,24 +192,16 @@ export default function UploadFood() {
         setPersonalizedAdvice(finalAdvice); 
         setShowAdvice(true);
       }
-
-      // 1. Nếu có danh sách món ăn từ Vision Agent (Detect > 0)
+      
       if (result?.detections && result.detections.length > 0) {
-        // Tính tổng Ratio của các món
         const totalRatio = result.detections.reduce((sum, d) => sum + (d.box_ratio || 0), 0);
         
-        // Tạo danh sách các món mới dựa trên tổng cân nặng hiện tại (editedWeight)
-        // Điều này đảm bảo nếu user sửa tổng cân nặng, từng món con cũng được chia lại đúng tỷ lệ
         const itemsToSave = result.detections.map(det => {
            let itemWeight = 0;
            if (totalRatio > 0) {
-             // Chia tỷ lệ: (Ratio Món / Tổng Ratio) * Tổng Cân Nặng Người Dùng Nhập/Edit
              itemWeight = (det.box_ratio / totalRatio) * editedWeight;
            }
            
-           // Tính lại calo cho món đó
-           // Calo = (Weight Mới / Weight Cũ của món) * Calo Cũ của món
-           // Hoặc an toàn hơn: (Weight Mới * CaloPer100g) / 100 (nhưng ta không có caloPer100g ở đây, nên dùng tỷ lệ)
            const itemCalorie = det.estimated_weight > 0 
               ? Math.round((itemWeight / det.estimated_weight) * det.estimated_calories)
               : 0;
@@ -237,9 +219,7 @@ export default function UploadFood() {
           dietComment: finalAdvice || "Vision Agent Analysis",
         };
         return await apiRequest("POST", "/api/food/entry", payload);
-      } 
-      // 2. Fallback: Nếu không detect được gì cụ thể (hoặc lỗi), lưu 1 cục
-      else {
+      } else {
          const entry = {
           userId: user?.id,
           foodName: editedName,
@@ -252,7 +232,7 @@ export default function UploadFood() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/calories/daily"] });
-      toast({ title: "Success!", description: "All detected items added to diary separately." });
+      toast({ title: "Success!", description: "Added to your diary." });
       handleReset();
     },
     onError: (error: Error) => {
@@ -295,7 +275,6 @@ export default function UploadFood() {
 
   return (
     <div className="max-w-4xl mx-auto space-y-8">
-      {/* CSS Animation */}
       <style>{`
         @keyframes scan-vertical {
           0% { top: 0%; opacity: 0; }
@@ -339,10 +318,8 @@ export default function UploadFood() {
             </div>
           ) : (
             <div className="space-y-8">
-              {/* Media Display & Scanning Effect */}
               <div className="relative rounded-xl overflow-hidden shadow-lg bg-black/5 min-h-[300px] flex items-center justify-center group">
                 
-                {/* Scanning Effect */}
                 {analyzeMutation.isPending && (
                   <div className="absolute inset-0 z-20 pointer-events-none">
                     <div className="absolute inset-0 bg-black/10 backdrop-blur-[1px]" />
@@ -377,12 +354,11 @@ export default function UploadFood() {
                   )
                 )}
 
-                {/* Nút bật/tắt Depth Vision */}
                 {result && result.type === "image" && result.depthData && (
                   <Button
                     variant="secondary"
                     size="sm"
-                    className="absolute top-4 right-4 bg-white/90 hover:bg-white shadow-md z-10"
+                    className="absolute top-4 right-4 bg-white/90 hover:bg-white shadow-md z-10 transition-all hover:scale-105"
                     onClick={() => setShowDepth(!showDepth)}
                   >
                     {showDepth ? (
@@ -396,7 +372,6 @@ export default function UploadFood() {
               
               {!result ? (
                 <div className="space-y-6">
-                  {/* Mode Selection */}
                   <div className="flex flex-col items-center gap-4 p-4 bg-muted/30 rounded-lg border max-w-md mx-auto">
                     <div className="flex items-center gap-3 w-full justify-center">
                       <Label htmlFor="mode-toggle" className={`text-sm font-medium ${!useAutoWeight ? "text-primary" : "text-muted-foreground"}`}>Manual Input</Label>
@@ -407,7 +382,7 @@ export default function UploadFood() {
                       <div className="w-full max-w-xs animate-in slide-in-from-top-2 fade-in">
                         <Label htmlFor="weight" className="text-xs text-muted-foreground mb-1.5 block">Total Meal Weight (grams)</Label>
                         <div className="relative">
-                          <ScaleIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                          <Scale className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                           <Input id="weight" type="number" value={weight} onChange={(e) => setWeight(e.target.value)} className="pl-9 h-10" placeholder="e.g. 500" min="1" />
                         </div>
                       </div>
@@ -416,7 +391,7 @@ export default function UploadFood() {
 
                   <div className="flex gap-4 justify-center">
                     <Button onClick={() => analyzeMutation.mutate()} disabled={analyzeMutation.isPending} className="h-12 px-8 rounded-lg font-semibold min-w-[200px]">
-                      {analyzeMutation.isPending ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Processing...</> : <><ImageIcon className="mr-2 h-4 w-4"/> Analyze {fileType === "video" ? "Video" : "Image"}</>}
+                      {analyzeMutation.isPending ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Analyzing...</> : <><ImageIcon className="mr-2 h-4 w-4"/> Analyze {fileType === "video" ? "Video" : "Image"}</>}
                     </Button>
                     <Button variant="outline" onClick={handleReset} className="h-12 px-8 rounded-lg font-semibold">Cancel</Button>
                   </div>
@@ -432,7 +407,7 @@ export default function UploadFood() {
                       <div className="space-y-1">
                         <p className="text-sm font-medium text-primary">Vision Agent</p>
                         <p className="text-sm text-muted-foreground">
-                          I detected <b>{result.foodName}</b>. Click on any item below to see its recipe and details.
+                          I detected <b>{result.foodName}</b>. Click on any item below to see details. Correct my estimation if needed.
                         </p>
                       </div>
                     </div>
@@ -449,10 +424,9 @@ export default function UploadFood() {
                         </Button>
                       </div>
 
-                      {/* Clickable Detections List */}
                       {result.detections && result.detections.length > 0 && (
                         <div className="text-sm text-muted-foreground">
-                          <p className="mb-2 text-xs font-medium uppercase tracking-wider opacity-70">Detected Items (Click to view info)</p>
+                          <p className="mb-2 text-xs font-medium uppercase tracking-wider opacity-70">Detected Items</p>
                           <ul className="flex flex-wrap justify-center gap-2">
                             {result.detections.map((d, i) => (
                               <li 
@@ -462,7 +436,7 @@ export default function UploadFood() {
                               >
                                 <span className="font-semibold text-foreground group-hover:text-primary">{d.class}</span>
                                 {d.estimated_weight > 0 && <span className="text-muted-foreground">~{d.estimated_weight}g</span>}
-                                <InformationCircleIcon className="h-4 w-4 text-muted-foreground group-hover:text-primary" />
+                                <Info className="h-4 w-4 text-muted-foreground group-hover:text-primary" />
                               </li>
                             ))}
                           </ul>
@@ -516,54 +490,67 @@ export default function UploadFood() {
         </CardContent>
       </Card>
 
-      {/* Recipe Detail Dialog */}
       <Dialog open={isRecipeDialogOpen} onOpenChange={setIsRecipeDialogOpen}>
-        <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col p-0 gap-0 overflow-hidden bg-background">
-          <div className="relative h-32 w-full shrink-0 bg-muted flex items-center justify-center overflow-hidden">
+        <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col p-0 gap-0 overflow-hidden bg-background border-none shadow-2xl">
+          <div className="relative h-40 w-full shrink-0 bg-gradient-to-r from-primary/20 to-purple-500/20 flex items-center justify-center overflow-hidden">
              {result?.annotatedData && (
-                <img src={result.annotatedData} className="absolute inset-0 w-full h-full object-cover opacity-20 blur-md" alt="" />
+                <img src={result.annotatedData} className="absolute inset-0 w-full h-full object-cover opacity-30 blur-md" alt="" />
              )}
-             <DialogTitle className="text-2xl font-bold text-foreground font-['Poppins'] z-10 capitalize">
-               {selectedRecipeMeal}
-             </DialogTitle>
-             <button onClick={() => setIsRecipeDialogOpen(false)} className="absolute top-4 right-4 p-2 bg-black/10 hover:bg-black/20 rounded-full z-20">
+             <div className="z-10 text-center">
+                <Badge className="mb-2 bg-black/50 hover:bg-black/50 text-white border-none">Food Knowledge</Badge>
+                <DialogTitle className="text-3xl font-bold text-foreground font-['Poppins'] capitalize drop-shadow-md">
+                  {selectedRecipeMeal}
+                </DialogTitle>
+             </div>
+             <button onClick={() => setIsRecipeDialogOpen(false)} className="absolute top-4 right-4 p-2 bg-black/10 hover:bg-black/20 rounded-full z-20 backdrop-blur-sm transition-colors">
                 <XIcon className="h-5 w-5" />
              </button>
           </div>
 
-          <ScrollArea className="flex-1 p-6">
+          <ScrollArea className="flex-1 p-6 bg-card/50">
             {recipeMutation.isPending || !recipeData ? (
               <div className="space-y-6">
+                <div className="grid grid-cols-2 gap-4"><Skeleton className="h-24 rounded-xl" /><Skeleton className="h-24 rounded-xl" /></div>
                 <div className="space-y-2"><Skeleton className="h-4 w-full" /><Skeleton className="h-4 w-3/4" /></div>
-                <div className="grid grid-cols-2 gap-4"><Skeleton className="h-20 w-full rounded-xl" /><Skeleton className="h-20 w-full rounded-xl" /></div>
-                <div className="space-y-2"><Skeleton className="h-6 w-1/3" /><Skeleton className="h-4 w-full" /><Skeleton className="h-4 w-full" /></div>
               </div>
             ) : (
-              <div className="space-y-8 animate-in fade-in duration-300">
-                <div className="space-y-4">
-                  <p className="text-muted-foreground leading-relaxed italic">"{recipeData.description}"</p>
-                  <div className="flex flex-wrap gap-3">
-                    <Badge variant="secondary" className="px-3 py-1 text-sm flex gap-1 items-center"><Clock className="h-3.5 w-3.5" /> {recipeData.cookingTime}</Badge>
-                    <Badge variant="secondary" className="px-3 py-1 text-sm flex gap-1 items-center"><ChefHat className="h-3.5 w-3.5" /> {recipeData.difficulty}</Badge>
-                  </div>
+              <div className="space-y-8 animate-in slide-in-from-bottom-4 duration-500">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <div className="bg-white dark:bg-gray-800 p-3 rounded-xl shadow-sm border flex flex-col items-center justify-center gap-1">
+                        <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">Energy</span>
+                        <div className="flex items-baseline gap-1"><span className="text-2xl font-bold text-primary">{recipeData.calories_100g}</span><span className="text-xs text-muted-foreground">kcal/100g</span></div>
+                    </div>
+                    <div className="bg-white dark:bg-gray-800 p-3 rounded-xl shadow-sm border flex flex-col items-center justify-center gap-1">
+                        <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">Avg. Price</span>
+                        <div className="flex items-center gap-1 text-green-600 dark:text-green-400"><DollarSign className="h-4 w-4" /><span className="text-xl font-bold">{recipeData.avg_price}</span></div>
+                    </div>
+                     <div className="bg-white dark:bg-gray-800 p-3 rounded-xl shadow-sm border flex flex-col items-center justify-center gap-1">
+                        <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">Protein</span>
+                        <span className="text-xl font-bold">{recipeData.macros.protein}</span>
+                    </div>
+                    <div className="bg-white dark:bg-gray-800 p-3 rounded-xl shadow-sm border flex flex-col items-center justify-center gap-1">
+                        <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">Fat</span>
+                        <span className="text-xl font-bold">{recipeData.macros.fat}</span>
+                    </div>
                 </div>
 
-                <div className="grid grid-cols-4 gap-2 p-4 rounded-xl bg-muted/30 border border-border/50">
-                   <div className="text-center"><p className="text-[10px] text-muted-foreground uppercase font-bold">Calories</p><p className="text-lg font-bold text-primary">{recipeData.macros.calories}</p></div>
-                   <div className="text-center border-l"><p className="text-[10px] text-muted-foreground uppercase font-bold">Protein</p><p className="text-lg font-bold">{recipeData.macros.protein}</p></div>
-                   <div className="text-center border-l"><p className="text-[10px] text-muted-foreground uppercase font-bold">Carbs</p><p className="text-lg font-bold">{recipeData.macros.carbs}</p></div>
-                   <div className="text-center border-l"><p className="text-[10px] text-muted-foreground uppercase font-bold">Fat</p><p className="text-lg font-bold">{recipeData.macros.fat}</p></div>
+                <div className="bg-blue-50 dark:bg-blue-950/30 p-5 rounded-2xl border border-blue-100 dark:border-blue-900">
+                    <h3 className="flex items-center gap-2 font-semibold text-blue-700 dark:text-blue-300 mb-2"><HeartPulse className="h-5 w-5" /> Health Insight</h3>
+                    <p className="text-sm text-muted-foreground leading-relaxed mb-3">{recipeData.health_benefit}</p>
+                    <div className="h-px w-full bg-blue-200 dark:bg-blue-800 my-3"></div>
+                    <p className="text-sm font-medium text-foreground italic">"💡 {recipeData.personalized_advice}"</p>
                 </div>
 
-                <div className="grid md:grid-cols-2 gap-6">
-                  <div>
-                    <h3 className="text-base font-semibold mb-3 flex items-center gap-2"><Utensils className="h-4 w-4 text-primary" /> Ingredients</h3>
-                    <ul className="space-y-2">{recipeData.ingredients.map((item, i) => (<li key={i} className="flex gap-2 text-sm"><CheckCircle2 className="h-4 w-4 text-primary/60 shrink-0 mt-0.5" /><span className="text-muted-foreground">{item}</span></li>))}</ul>
-                  </div>
-                  <div>
-                    <h3 className="text-base font-semibold mb-3 flex items-center gap-2"><ChefHat className="h-4 w-4 text-primary" /> Instructions</h3>
-                    <div className="space-y-3">{recipeData.instructions.map((step, i) => (<div key={i} className="flex gap-3 text-sm"><span className="font-bold text-primary/60">{i + 1}.</span><p className="text-muted-foreground">{step}</p></div>))}</div>
-                  </div>
+                <div>
+                    <h3 className="flex items-center gap-2 font-semibold text-foreground mb-4"><Sparkles className="h-5 w-5 text-amber-500" /> Pairing Suggestions</h3>
+                    <div className="grid gap-3">
+                        {recipeData.suggestions.map((item, idx) => (
+                            <div key={idx} className="flex items-center gap-3 p-3 rounded-xl bg-muted/30 hover:bg-muted/50 transition-colors border">
+                                <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-xs">{idx + 1}</div>
+                                <span className="text-sm font-medium">{item}</span>
+                            </div>
+                        ))}
+                    </div>
                 </div>
               </div>
             )}
