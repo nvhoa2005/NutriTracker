@@ -2,12 +2,9 @@ import OpenAI from "openai";
 import fs from "fs";
 import path from "path";
 
-// Referenced from blueprint:javascript_openai
-// the newest OpenAI model is "gpt-5" which was released August 7, 2025. do not change this unless explicitly requested by the user
-
 let openai: OpenAI | null = null;
 
-interface UserProfileContext {
+export interface UserProfileContext {
   name: string;
   age: number;
   gender: string;
@@ -16,19 +13,20 @@ interface UserProfileContext {
   goal: string;
 }
 
-export interface RecipeData {
-  description: string;
-  ingredients: string[];
-  instructions: string[];
+export interface FoodDetailData {
+  calories_100g: number;
+  avg_price: string;       
+  health_benefit: string;  
+  personalized_advice: string; 
+  suggestions: string[];   
   macros: {
-    calories: number;
     protein: string;
     carbs: string;
     fat: string;
   };
-  cookingTime: string;
-  difficulty: string;
 }
+
+export interface RecipeData extends FoodDetailData {} 
 
 function getOpenAIClient(): OpenAI {
   if (!openai) {
@@ -40,122 +38,101 @@ function getOpenAIClient(): OpenAI {
   return openai;
 }
 
-export async function generateMealRecipe(mealName: string): Promise<RecipeData> {
+export async function generateMealRecipe(
+  mealName: string, 
+  userProfile?: UserProfileContext 
+): Promise<FoodDetailData> {
   try {
     const client = getOpenAIClient();
     
+    let userContextStr = "";
+    if (userProfile) {
+      userContextStr = `
+      Target User Context:
+      - Goal: ${userProfile.goal} (lose_weight/maintain/gain_muscle)
+      - Info: ${userProfile.age} years old, ${userProfile.gender}.
+      `;
+    }
+
     const prompt = `
-      Create a healthy recipe for: "${mealName}".
-      Return ONLY a valid JSON object with the following structure (no markdown, no extra text):
+      Analyze the food item: "${mealName}".
+      ${userContextStr}
+
+      Return ONLY a valid JSON object with the following structure. Do not include markdown formatting.
       {
-        "description": "A brief, appetizing description (1-2 sentences)",
-        "ingredients": ["ingredient 1", "ingredient 2", ...],
-        "instructions": ["step 1", "step 2", ...],
+        "calories_100g": number (approximate calories per 100g),
+        "avg_price": "string" (estimated price range in USD, e.g., '$3 - $5'),
+        "health_benefit": "string" (1-2 sentences on general health benefits of this food),
+        "personalized_advice": "string" (Specific advice based on the user's goal. E.g., if gaining muscle, mention protein. If losing weight, mention portion control),
+        "suggestions": ["string", "string", "string"] (3 food items that pair well with this to create a balanced meal for the user's goal),
         "macros": {
-          "calories": number (estimated total),
-          "protein": "e.g. 25g",
-          "carbs": "e.g. 30g",
-          "fat": "e.g. 10g"
-        },
-        "cookingTime": "e.g. 20 mins",
-        "difficulty": "Easy/Medium/Hard"
+          "protein": "string" (e.g., '10g'),
+          "carbs": "string" (e.g., '20g'),
+          "fat": "string" (e.g., '5g')
+        }
       }
     `;
 
     const response = await client.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
-        { role: "system", content: "You are a professional chef and nutritionist." },
+        { role: "system", content: "You are a professional nutritionist and food market expert." },
         { role: "user", content: prompt },
       ],
       response_format: { type: "json_object" },
     });
 
     const content = response.choices[0].message.content || "{}";
-    return JSON.parse(content) as RecipeData;
+    return JSON.parse(content) as FoodDetailData;
+
   } catch (error) {
-    console.error("Recipe generation error:", error);
-    // Trả về dữ liệu giả nếu lỗi để không crash app
+    console.error("Food Detail generation error:", error);
     return {
-      description: "Could not load recipe details.",
-      ingredients: [],
-      instructions: [],
-      macros: { calories: 0, protein: "0g", carbs: "0g", fat: "0g" },
-      cookingTime: "N/A",
-      difficulty: "Unknown"
+      calories_100g: 0,
+      avg_price: "N/A",
+      health_benefit: "Information currently unavailable.",
+      personalized_advice: "Please consult a nutritionist.",
+      suggestions: [],
+      macros: { protein: "0g", carbs: "0g", fat: "0g" }
     };
   }
 }
 
+
 export async function analyzeFoodImageByChatGPT(base64Image: string): Promise<{ foodName: string; confidence: number }> {
   try {
-    const classesPath = path.resolve("./classes.txt");
-    const allowedFoods = fs.readFileSync(classesPath, "utf-8").split("\n").map(s => s.trim()).filter(Boolean);
-
-    const allowedList = allowedFoods.join(", ");
-
     const client = getOpenAIClient();
     const response = await client.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
         {
           role: "system",
-          content: `You are a food recognition expert. You must identify the food item ONLY from the following list of allowed foods: ${allowedList}. 
-Respond strictly with JSON in this format: { "foodName": string, "confidence": number }. 
-If the food is not clearly one of these 100 classes, choose the closest one.`,
+          content: "Identify the food item in this image. Return JSON: { \"foodName\": string, \"confidence\": number }",
         },
         {
           role: "user",
           content: [
-            {
-              type: "text",
-              text: "Identify which food this image shows, using only one label from the allowed list.",
-            },
-            {
-              type: "image_url",
-              image_url: { url: `data:image/jpeg;base64,${base64Image}` },
-            },
+            { type: "text", text: "What food is this?" },
+            { type: "image_url", image_url: { url: `data:image/jpeg;base64,${base64Image}` } },
           ],
         },
       ],
       response_format: { type: "json_object" },
-      max_completion_tokens: 300,
     });
 
     const result = JSON.parse(response.choices[0].message.content || "{}");
-
     return {
       foodName: result.foodName || "Unknown Food",
-      confidence: Math.max(0, Math.min(1, result.confidence || 0.8)),
+      confidence: result.confidence || 0.8,
     };
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : "Unknown error";
-    throw new Error("Failed to analyze food image: " + errorMessage);
+    console.error("Analyze Error:", error);
+    return { foodName: "Unknown", confidence: 0 };
   }
 }
 
 export async function generateFoodAdvice(foodName: string): Promise<string> {
-  try {
-    const client = getOpenAIClient();
-    const response = await client.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [
-        {
-          role: "system",
-          content: "You are a nutrition expert. Provide brief, helpful advice about the food item.",
-        },
-        {
-          role: "user",
-          content: `Provide a brief piece of nutritional advice or health benefit for ${foodName}.`,
-        },
-      ],
-      max_completion_tokens: 200,
-    });
-
-    return response.choices[0].message.content || "Good for your health.";
-  } catch (error) {
-    return "Good for your health.";
-  }
+  return `Enjoy ${foodName} as part of a balanced diet.`;
 }
 
 export async function generatePersonalizedFoodAdvice(
@@ -165,46 +142,17 @@ export async function generatePersonalizedFoodAdvice(
 ): Promise<string> {
   try {
     const client = getOpenAIClient();
-    
-    // Xây dựng prompt chi tiết
     const prompt = `
-    You are a professional nutritionist. Provide a personalized review of a food item for a specific user.
-    
-    User Profile:
-    - Name: ${userProfile.name}
-    - Age: ${userProfile.age}
-    - Gender: ${userProfile.gender}
-    - Height: ${userProfile.height}cm
-    - Weight: ${userProfile.weight}kg
-    - Fitness Goal: ${userProfile.goal} (lose_weight/maintain/gain_muscle)
-
-    Food Item:
-    - Name: ${foodName}
-    - Estimated Calories: ${calories} kcal
-
-    Please analyze this food item in the context of the user's goals and stats. 
-    Is it a good choice for them? What should they be careful about? 
-    Keep the advice encouraging but realistic. Limit to 3-4 sentences.
+    User Goal: ${userProfile.goal}. Food: ${foodName} (${calories} kcal).
+    Give some sentences of advice.
     `;
-
     const response = await client.chat.completions.create({
       model: "gpt-4o-mini",
-      messages: [
-        {
-          role: "system",
-          content: "You are a helpful nutrition assistant.",
-        },
-        {
-          role: "user",
-          content: prompt,
-        },
-      ],
-      max_completion_tokens: 300,
+      messages: [{ role: "user", content: prompt }],
+      max_completion_tokens: 200,
     });
-
-    return response.choices[0].message.content || "Could not generate advice at this time.";
-  } catch (error) {
-    console.error("OpenAI Error:", error);
-    throw new Error("Failed to generate personalized advice");
+    return response.choices[0].message.content || "Eat moderately.";
+  } catch {
+    return "Eat moderately.";
   }
 }
