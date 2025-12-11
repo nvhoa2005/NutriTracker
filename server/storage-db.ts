@@ -11,7 +11,6 @@ import type {
 import type { IStorage } from "./storage";
 import { randomUUID } from "crypto";
 
-// Lazy-initialized MySQL connection pool
 let pool: Pool | null = null;
 
 function createMysqlPool(): Pool {
@@ -20,14 +19,13 @@ function createMysqlPool(): Pool {
   }
   
   if (!pool) {
-    // Tự động clean connection string nếu có tham số thừa của Postgres
     let connectionString = process.env.DATABASE_URL;
     try {
       const url = new URL(connectionString);
       const paramsToRemove = ['sslmode', 'ssl', 'sslrootcert', 'sslcert', 'sslkey'];
       paramsToRemove.forEach(param => url.searchParams.delete(param));
       connectionString = url.toString();
-    } catch (e) { /* Ignore parsing error */ }
+    } catch (e) {}
     
     pool = mysql.createPool({
       uri: connectionString,
@@ -41,7 +39,6 @@ function createMysqlPool(): Pool {
 
 export const db = drizzle(createMysqlPool());
 
-// --- MAPPER FUNCTIONS (Database snake_case -> TypeScript camelCase) ---
 
 function mapUserFromDb(dbUser: any): User {
   if (!dbUser) return dbUser;
@@ -64,7 +61,7 @@ function mapFoodEntryFromDb(dbEntry: any): FoodEntry {
   return {
     id: dbEntry.id,
     userId: dbEntry.user_id,
-    foodName: dbEntry.food_name, // Map từ Alias trong câu query JOIN
+    foodName: dbEntry.food_name, 
     calories: dbEntry.calories,
     weight: dbEntry.weight,
     imageUrl: dbEntry.image_url,
@@ -76,7 +73,7 @@ function mapFoodEntryFromDb(dbEntry: any): FoodEntry {
 function mapFoodItemFromDb(dbItem: any): FoodItem {
   if (!dbItem) return dbItem;
   return {
-    id: dbItem.id,
+    id: String(dbItem.id), 
     name: dbItem.name,
     caloriesPer100g: dbItem.calories_per_100g,
     advice: dbItem.advice,
@@ -94,14 +91,12 @@ function mapChatMessageFromDb(dbMessage: any): ChatMessage {
   };
 }
 
-// --- MAIN STORAGE CLASS ---
 
 export class DbStorage implements IStorage {
   private getPool(): Pool {
     return createMysqlPool();
   }
 
-  // === USERS ===
   async getUserByUsername(username: string): Promise<User | undefined> {
     const pool = this.getPool();
     const [rows] = await pool.query("SELECT * FROM users WHERE username = ?", [username]);
@@ -118,10 +113,9 @@ export class DbStorage implements IStorage {
 
   async createUser(user: InsertUser): Promise<User> {
     const pool = this.getPool();
+    
     const [rows] = await pool.query("SELECT id FROM users");
-    
     let maxId = 0;
-    
     if (Array.isArray(rows)) {
       rows.forEach((row: any) => {
         if (typeof row.id === 'string' && row.id.startsWith('u')) {
@@ -132,23 +126,12 @@ export class DbStorage implements IStorage {
         }
       });
     }
-
     const newId = `u${maxId + 1}`;
 
     await pool.query(
       `INSERT INTO users (id, username, password, name, age, gender, height, weight, goal, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
-      [
-        newId,
-        user.username,
-        user.password,
-        user.name,
-        user.age,
-        user.gender,
-        user.height,
-        user.weight,
-        user.goal,
-      ]
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+      [newId, user.username, user.password, user.name, user.age, user.gender, user.height, user.weight, user.goal]
     );
 
     const created = await this.getUser(newId);
@@ -170,14 +153,13 @@ export class DbStorage implements IStorage {
     return (await this.getUser(id))!;
   }
 
-  // === FOOD ENTRIES ===
   async getFoodEntry(id: string): Promise<FoodEntry | undefined> {
     const pool = this.getPool();
     const [rows] = await pool.query(
       `SELECT fe.*, fi.name as food_name 
-      FROM food_entries fe
-      LEFT JOIN food_items fi ON fe.food_id = fi.id
-      WHERE fe.id = ?`, 
+       FROM food_entries fe
+       LEFT JOIN food_items fi ON fe.food_id = fi.id
+       WHERE fe.id = ?`, 
       [id]
     );
     const data = Array.isArray(rows) ? rows[0] : undefined;
@@ -188,10 +170,10 @@ export class DbStorage implements IStorage {
     const pool = this.getPool();
     const [rows] = await pool.query(
       `SELECT fe.*, fi.name as food_name, fe.food_id 
-      FROM food_entries fe
-      LEFT JOIN food_items fi ON fe.food_id = fi.id
-      WHERE fe.user_id = ? 
-      ORDER BY fe.timestamp DESC`, 
+       FROM food_entries fe
+       LEFT JOIN food_items fi ON fe.food_id = fi.id
+       WHERE fe.user_id = ? 
+       ORDER BY fe.timestamp DESC`, 
       [userId]
     );
     return Array.isArray(rows) ? rows.map(mapFoodEntryFromDb) : [];
@@ -200,7 +182,6 @@ export class DbStorage implements IStorage {
   async createFoodEntry(entry: InsertFoodEntry): Promise<FoodEntry> {
     const pool = this.getPool();
     
-    // Logic tạo ID: f{userIdNum}_{sequence}
     const userIdNum = entry.userId.replace(/\D/g, '') || entry.userId; 
     const [existingRows] = await pool.query("SELECT id FROM food_entries WHERE user_id = ?", [entry.userId]);
     let maxSequence = 0;
@@ -215,8 +196,8 @@ export class DbStorage implements IStorage {
     }
     const newId = `f${userIdNum}_${maxSequence + 1}`;
 
-    // Logic tìm/tạo foodItem
     let foodItem = await this.getFoodItemByName(entry.foodName);
+    
     if (!foodItem) {
       foodItem = await this.createFoodItem({
         name: entry.foodName,
@@ -227,11 +208,13 @@ export class DbStorage implements IStorage {
 
     await pool.query(
       `INSERT INTO food_entries (id, user_id, food_id, calories, image_url, diet_comment, timestamp)
-      VALUES (?, ?, ?, ?, ?, ?, NOW())`,
+       VALUES (?, ?, ?, ?, ?, ?, NOW())`,
       [newId, entry.userId, foodItem.id, entry.calories, entry.imageUrl ?? null, entry.dietComment ?? null]
     );
 
-    return (await this.getFoodEntry(newId))!;
+    const created = await this.getFoodEntry(newId);
+    if (!created) throw new Error("Create food entry failed");
+    return created;
   }
 
   async deleteFoodEntry(id: string): Promise<boolean> {
@@ -240,7 +223,6 @@ export class DbStorage implements IStorage {
     return (result as any).affectedRows > 0;
   }
 
-  // === FOOD ITEMS ===
   async getFoodItem(id: string): Promise<FoodItem | undefined> {
     const pool = this.getPool();
     const [rows] = await pool.query("SELECT * FROM food_items WHERE id = ?", [id]);
@@ -257,12 +239,26 @@ export class DbStorage implements IStorage {
 
   async createFoodItem(item: InsertFoodItem): Promise<FoodItem> {
     const pool = this.getPool();
-    const id = randomUUID();
-    await pool.query(
-      `INSERT INTO food_items (id, name, calories_per_100g, advice) VALUES (?, ?, ?, ?)`,
-      [id, item.name, item.caloriesPer100g, item.advice ?? "Good for your health."]
+    
+    let safeAdvice = item.advice || "Good for your health.";
+    if (safeAdvice.length > 490) {
+      safeAdvice = safeAdvice.substring(0, 490) + "..."; 
+    }
+
+    const [result] = await pool.query(
+      `INSERT INTO food_items (name, calories_per_100g, advice) VALUES (?, ?, ?)`,
+      [
+        item.name, 
+        item.caloriesPer100g, 
+        safeAdvice 
+      ]
     );
-    return (await this.getFoodItem(id))!;
+    
+    const insertId = (result as any).insertId;
+    
+    const created = await this.getFoodItem(String(insertId));
+    if (!created) throw new Error("Create food item failed");
+    return created;
   }
 
   async getAllFoodItems(): Promise<FoodItem[]> {
@@ -271,7 +267,6 @@ export class DbStorage implements IStorage {
     return Array.isArray(rows) ? rows.map(mapFoodItemFromDb) : [];
   }
 
-  // === CHAT MESSAGES ===
   async getChatMessagesByUser(userId: string): Promise<ChatMessage[]> {
     const pool = this.getPool();
     const [rows] = await pool.query(
@@ -283,7 +278,7 @@ export class DbStorage implements IStorage {
 
   async createChatMessage(message: InsertChatMessage): Promise<ChatMessage> {
     const pool = this.getPool();
-    const id = randomUUID();
+    const id = randomUUID(); 
     await pool.query(
       `INSERT INTO chat_messages (id, user_id, role, content, timestamp) VALUES (?, ?, ?, ?, NOW())`,
       [id, message.userId, message.role, message.content]
@@ -298,20 +293,16 @@ export class DbStorage implements IStorage {
     return (result as any).affectedRows > 0;
   }
 
-  // === RECIPES ===
   async getRecipeByName(mealName: string): Promise<Recipe | undefined> {
     const pool = this.getPool();
-    // Tìm kiếm chính xác tên món ăn trong bảng recipes
     const [rows] = await pool.query("SELECT * FROM recipes WHERE meal_name = ?", [mealName]);
     
-    // [SỬA LỖI GẠCH ĐỎ]: Thêm 'as any' vào rows[0]
     const data = Array.isArray(rows) ? (rows[0] as any) : undefined;
     
     if (data) {
       return {
         id: data.id,
         mealName: data.meal_name,
-        // Bây giờ TypeScript sẽ không báo lỗi ở data.data nữa
         data: typeof data.data === 'string' ? JSON.parse(data.data) : data.data,
         createdAt: data.created_at
       };
@@ -321,12 +312,14 @@ export class DbStorage implements IStorage {
 
   async createRecipe(insertRecipe: InsertRecipe): Promise<Recipe> {
     const pool = this.getPool();
-    const id = randomUUID();
+    const id = randomUUID(); 
     const jsonData = JSON.stringify(insertRecipe.data);
+    
     await pool.query(
       `INSERT INTO recipes (id, meal_name, data, created_at) VALUES (?, ?, ?, NOW())`,
       [id, insertRecipe.mealName, jsonData]
     );
+    
     return {
       id,
       mealName: insertRecipe.mealName,
