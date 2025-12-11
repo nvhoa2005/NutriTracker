@@ -23,7 +23,7 @@ const CALORIE_DB: Record<string, number> = {
 };
 
 function estimateWeightFromVolume(volumeScore: number): number {
-  const DENSITY_FACTOR = 35.0; 
+  const DENSITY_FACTOR = 10; 
   
   let weight = volumeScore * DENSITY_FACTOR;
   
