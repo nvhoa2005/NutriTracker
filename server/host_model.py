@@ -87,7 +87,8 @@ def get_depth_map(img_cv2):
     return depth_map, f"data:image/jpeg;base64,{depth_base64}"
 
 def calculate_volume(mask_polygon, depth_map, img_shape):
-    if depth_map is None: return 0
+    if depth_map is None: 
+        return 0
     mask = np.zeros(img_shape[:2], dtype=np.uint8)
     h, w = img_shape[:2]
     if len(mask_polygon) > 0:
@@ -95,7 +96,8 @@ def calculate_volume(mask_polygon, depth_map, img_shape):
         cv2.fillPoly(mask, [poly_pixels], 1)
 
     object_depth_values = depth_map[mask > 0]
-    if len(object_depth_values) == 0: return 0
+    if len(object_depth_values) == 0:
+        return 0
 
     avg_depth = np.mean(object_depth_values)
     area_pixels = np.sum(mask)
@@ -170,7 +172,8 @@ def process_video(model, video_path):
     try:
         while cap.isOpened():
             ret, frame = cap.read()
-            if not ret: break
+            if not ret: 
+                break
             
             results = model.predict(frame, conf=0.25, verbose=False, classes=food_ids)
             result = results[0]
@@ -229,7 +232,8 @@ def process_video(model, video_path):
 @app.post("/predict")
 async def predict(file: UploadFile = File(...)):
     model = app_state.get("yolo")
-    if not model: raise HTTPException(status_code=503, detail="Model Loading...")
+    if not model: 
+        raise HTTPException(status_code=503, detail="Model Loading...")
     
     content_type = file.content_type
     if content_type.startswith("image/"):
